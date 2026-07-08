@@ -1,0 +1,760 @@
+[
+  {
+    "id": "TC001",
+    "title": "Supervisor can complete the full inspection workflow",
+    "description": "A signed-in supervisor can move through all five inspection steps and submit a completed inspection successfully.",
+    "category": "Multi-Step Plant Inspection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Select a zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a block"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid plant ID"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in botanical details"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in environmental care details"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in growth measurements"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Add notes"
+      },
+      {
+        "type": "action",
+        "description": "Capture or upload a plant photo"
+      },
+      {
+        "type": "action",
+        "description": "Submit the inspection"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the submission complete state is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection was recorded successfully"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Supervisor can sign in and reach the dashboard",
+    "description": "A supervisor can authenticate from the splash page and land on the protected dashboard.",
+    "category": "Supervisor Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify protected supervisor content is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Unauthenticated users are redirected away from the dashboard",
+    "description": "A visitor who opens the dashboard without signing in is taken back to the splash page.",
+    "category": "Supervisor Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the splash page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify access to protected dashboard content is blocked"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Unauthenticated users are redirected away from inspection entry",
+    "description": "A visitor who opens the inspection flow without signing in is taken back to the splash page.",
+    "category": "Supervisor Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /inspect/step1"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the splash page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify access to the inspection flow is blocked"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Offline inspection is saved locally when submitted without connectivity",
+    "description": "A signed-in supervisor can complete an inspection offline and save it locally for later synchronization.",
+    "category": "Offline Data Persistence and Sync",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Select a zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a block"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid plant ID"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in botanical details"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in environmental care details"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Fill in growth measurements"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "action",
+        "description": "Add notes"
+      },
+      {
+        "type": "action",
+        "description": "Capture or upload a plant photo"
+      },
+      {
+        "type": "action",
+        "description": "Submit the inspection while offline"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection is saved locally"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an offline save confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Supervisor can use dashboard sync controls to process queued records",
+    "description": "A signed-in supervisor can open dashboard sync controls, trigger synchronization, and see pending records clear after processing.",
+    "category": "Offline Data Persistence and Sync",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the sync queue from the dashboard"
+      },
+      {
+        "type": "action",
+        "description": "Trigger synchronization"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify queued records are cleared"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify updated sync status is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Trigger manual sync from the profile page",
+    "description": "A supervisor can trigger synchronization from the profile page and see the sync status update afterward.",
+    "category": "Supervisor Profile and Sync Controls",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Trigger manual synchronization"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sync status updates"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pending records are no longer shown"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Supervisor can use profile sync controls to process pending records",
+    "description": "A signed-in supervisor can open profile sync controls, trigger synchronization, and see pending records processed after connectivity returns.",
+    "category": "Offline Data Persistence and Sync",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Trigger synchronization from profile"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pending records are processed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sync controls show an updated state"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Supervisor can review history and see sync status for past inspections",
+    "description": "A signed-in supervisor can open history and review previously logged inspections with their sync status.",
+    "category": "Offline Data Persistence and Sync",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the inspection history page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify inspection history is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify sync status information is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC010",
+    "title": "Review the inspection history list",
+    "description": "A supervisor can open the inspection history page and see previously logged inspections with their sync status.",
+    "category": "Inspection History",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open inspection history"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a list of inspection records is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify sync status information is displayed for the records"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC011",
+    "title": "Open a past inspection and review its stored details",
+    "description": "A supervisor can open a previously logged inspection from history and view the saved inspection details and sync state.",
+    "category": "Inspection History",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open inspection history"
+      },
+      {
+        "type": "action",
+        "description": "Click a previously logged inspection record"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection detail view is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection's stored details and sync status are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC012",
+    "title": "View the supervisor profile page",
+    "description": "A supervisor can open the profile page and review profile information and sync-related settings.",
+    "category": "Supervisor Profile and Sync Controls",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the profile page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify profile information is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify sync-related settings are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Supervisor can view the plantation digital twin",
+    "description": "A signed-in supervisor can open the digital twin page and view the plantation map layout.",
+    "category": "Digital Twin",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the digital twin page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the plantation map is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the digital twin content is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC014",
+    "title": "View the plantation digital twin map",
+    "description": "An authenticated user can open the digital twin page and see the plantation map layout for visual field reference.",
+    "category": "Digital Twin Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the digital twin map"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the plantation map is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify field layout information is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Return to the dashboard from the profile page",
+    "description": "A supervisor can use the profile page navigation to return to the dashboard and continue monitoring the app.",
+    "category": "Supervisor Profile and Sync Controls",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to return to the dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard metrics are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Inspect the map layout by panning",
+    "description": "An authenticated user can interact with the digital twin map to inspect different plantation areas.",
+    "category": "Digital Twin Map",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the digital twin map"
+      },
+      {
+        "type": "action",
+        "description": "Pan the map to inspect another area"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the map remains visible after interaction"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify plantation layout content is still displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Supervisor cannot proceed with an invalid plant ID",
+    "description": "A signed-in supervisor who enters an invalid plant ID on step 1 remains on step 1 and sees validation blocking progress.",
+    "category": "Multi-Step Plant Inspection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the supervisor email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the supervisor login form"
+      },
+      {
+        "type": "action",
+        "description": "Select a zone"
+      },
+      {
+        "type": "action",
+        "description": "Select a block"
+      },
+      {
+        "type": "action",
+        "description": "Fill in an invalid plant ID"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to the next step"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a plant ID validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify step 2 is not displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC018",
+    "title": "See an empty history state when no inspections exist",
+    "description": "A supervisor can open inspection history and see an empty state when no inspection records have been logged.",
+    "category": "Inspection History",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open inspection history"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state message is displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]
