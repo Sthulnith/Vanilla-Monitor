@@ -153,8 +153,6 @@ export default function DashboardPage() {
       vine_height_cm: 100,
       foliage_color: 'Green',
       planting_arrangement: 'Square',
-      dead_support_trees: 0,
-      dead_vines_count: 0,
       field_notes: `Quick Photo: ${photoNotes}`,
     };
 

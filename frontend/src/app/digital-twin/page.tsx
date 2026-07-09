@@ -51,15 +51,13 @@ export default function DigitalTwinPage() {
         if (statusMap[key]) {
           const pH = s.soil_pH;
           const foliage = s.foliage_color;
-          const deadVines = s.dead_vines_count || 0;
 
-          if (pH < 5.5 || pH > 7.0 || foliage === 'Brown' || foliage === 'Red' || deadVines > 2) {
+          if (pH < 5.5 || pH > 7.0 || foliage === 'Brown' || foliage === 'Red') {
             statusMap[key].status = 'danger';
           } else if (
             ((pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)) ||
             foliage === 'Yellow' ||
-            foliage === 'Mixed' ||
-            deadVines > 0
+            foliage === 'Mixed'
           ) {
             if (statusMap[key].status !== 'danger') {
               statusMap[key].status = 'warning';

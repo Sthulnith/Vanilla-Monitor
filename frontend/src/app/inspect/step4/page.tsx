@@ -17,9 +17,6 @@ export default function Step4GrowthTracker() {
   const [previousHeight, setPreviousHeight] = useState<number | null>(null);
   const [foliageColor, setFoliageColor] = useState<string | null>(formData.foliage_color);
   const [plantingArrangement, setPlantingArrangement] = useState<string | null>(formData.planting_arrangement);
-  
-  const [deadTrees, setDeadTrees] = useState<number>(formData.dead_support_trees || 0);
-  const [deadVines, setDeadVines] = useState<number>(formData.dead_vines_count || 0);
 
   // Fetch previous height
   useEffect(() => {
@@ -53,8 +50,6 @@ export default function Step4GrowthTracker() {
       height_delta_cm: delta,
       foliage_color: foliageColor,
       planting_arrangement: plantingArrangement,
-      dead_support_trees: deadTrees,
-      dead_vines_count: deadVines,
     });
 
     router.push('/inspect/step5');
@@ -229,65 +224,6 @@ export default function Step4GrowthTracker() {
           </div>
         </div>
 
-        {/* BLOCK MORTALITY TRACKER (Amber border) */}
-        <div className="bg-white rounded-2xl border-2 border-amber-warning p-4 shadow-xs space-y-3">
-          <h3 className="text-xs font-extrabold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
-            Block Mortality — This Inspection
-          </h3>
-          <p className="text-[9px] text-text-secondary font-medium leading-relaxed">
-            Record any dead vines or support trees in Block {formData.block} observed today.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            {/* Dead support trees */}
-            <div className="bg-amber-warning/10 rounded-xl p-3 border border-amber-warning/20 flex flex-col items-center">
-              <span className="text-[9px] font-extrabold uppercase text-amber-800 text-center leading-normal">
-                Dead Support Trees
-              </span>
-              <div className="text-2xl font-black text-amber-900 my-1.5">{deadTrees}</div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDeadTrees(Math.max(0, deadTrees - 1))}
-                  className="h-7 w-7 rounded-lg border border-amber-warning/30 bg-white flex items-center justify-center font-bold text-xs hover:bg-amber-50 active:scale-95"
-                >
-                  -
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeadTrees(deadTrees + 1)}
-                  className="h-7 w-7 rounded-lg border border-amber-warning/30 bg-white flex items-center justify-center font-bold text-xs hover:bg-amber-50 active:scale-95"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            {/* Dead vines */}
-            <div className="bg-amber-warning/10 rounded-xl p-3 border border-amber-warning/20 flex flex-col items-center">
-              <span className="text-[9px] font-extrabold uppercase text-amber-800 text-center leading-normal">
-                Dead Vines
-              </span>
-              <div className="text-2xl font-black text-amber-900 my-1.5">{deadVines}</div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDeadVines(Math.max(0, deadVines - 1))}
-                  className="h-7 w-7 rounded-lg border border-amber-warning/30 bg-white flex items-center justify-center font-bold text-xs hover:bg-amber-50 active:scale-95"
-                >
-                  -
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeadVines(deadVines + 1)}
-                  className="h-7 w-7 rounded-lg border border-amber-warning/30 bg-white flex items-center justify-center font-bold text-xs hover:bg-amber-50 active:scale-95"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Floating Bottom Button */}

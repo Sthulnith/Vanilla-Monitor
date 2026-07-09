@@ -22,6 +22,13 @@ origins = [
     "http://127.0.0.1:3000",
 ]
 
+cors_origins_env = os.getenv("CORS_ORIGINS")
+if cors_origins_env:
+    additional_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+    origins.extend(additional_origins)
+
+origins = list(set(origins))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -50,17 +57,25 @@ class Submission(BaseModel):
     plant_id: str
     zone: str
     block: str
-    foliage_status: Optional[str] = None
-    flowers_count: Optional[int] = None
-    vine_health: Optional[str] = None
-    weed_presence: Optional[str] = None
-    soil_moisture: Optional[str] = None
-    shade_cover: Optional[str] = None
+    supervisor_name: Optional[str] = None
+    supervisor_email: Optional[str] = None
+    watering_status: Optional[str] = None
+    sunlight_level: Optional[str] = None
+    shade_level: Optional[str] = None
+    soil_ph: Optional[float] = None
+    temperature_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    soil_type: Optional[str] = None
+    fertiliser_type: Optional[List[str]] = None
+    last_fertilised: Optional[str] = None
+    fertiliser_used: Optional[str] = None
     vine_height_cm: Optional[float] = None
-    bean_count: Optional[int] = None
+    height_delta_cm: Optional[float] = None
+    foliage_color: Optional[str] = None
+    planting_arrangement: Optional[str] = None
     notes: Optional[str] = None
+    photo_filename: Optional[str] = None
     photo_url: Optional[str] = None
-    photo_drive_url: Optional[str] = None
     status: Optional[str] = "synced"
     sync_status: Optional[str] = "synced"
     submitted_at: Optional[str] = None

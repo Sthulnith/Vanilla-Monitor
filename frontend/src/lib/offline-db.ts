@@ -93,15 +93,15 @@ export async function getPendingCount(): Promise<number> {
   return pending.length;
 }
 
-export async function markAsSyncedInDB(id: string, photoDriveUrl?: string): Promise<void> {
+export async function markAsSyncedInDB(id: string, photoUrl?: string): Promise<void> {
   const db = await getDB();
   if (!db) return;
   const submission = await db.get('submissions', id);
   if (submission) {
     submission.status = 'synced';
     submission.sync_status = 'synced';
-    if (photoDriveUrl) {
-      submission.photo_drive_url = photoDriveUrl;
+    if (photoUrl) {
+      submission.photo_url = photoUrl;
     }
     submission.synced_at = new Date().toISOString();
     await db.put('submissions', submission);

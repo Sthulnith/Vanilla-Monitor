@@ -1,10 +1,11 @@
 import {
   saveSubmissionOffline as saveDBOffline,
   getPendingSubmissions,
-  markAsSyncedInDB
+  markAsSyncedInDB,
+  getMortalityReports
 } from './offline-db';
 import { appendToSheets, buildSheetRow } from './sheetsService';
-import { uploadPhotoToDrive } from './driveService';
+import { supabase } from './supabaseClient';
 
 /**
  * Converts a Blob to a Base64-encoded string.
@@ -92,7 +93,7 @@ export async function saveInspectionOffline(formData: any, photoBlob: Blob | nul
 }
 
 /**
- * Uploads all pending submissions to Google Drive & Google Sheets.
+ * Uploads all pending submissions to Google Drive & Google Sheets, and updates the FastAPI backend.
  */
 export async function syncPendingSubmissions(): Promise<{ synced: number; failed: number }> {
   if (typeof window === 'undefined') return { synced: 0, failed: 0 };
@@ -115,29 +116,92 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
   let synced = 0;
   let failed = 0;
 
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
   for (const submission of pending) {
     try {
-      let photoDriveUrl = null;
+      let supabasePhotoUrl = null;
 
-      // 1. Upload photo to Google Drive first if present (disabled for now)
-      /*
+      // 1. Upload photo to Supabase Storage first if present
       if (submission.photo_blob && submission.photo_filename) {
-        const blob = base64ToBlob(submission.photo_blob);
-        photoDriveUrl = await uploadPhotoToDrive(
-          token,
-          blob,
-          submission.zone,
-          submission.photo_filename
-        );
+        try {
+          const blob = base64ToBlob(submission.photo_blob);
+          const filePath = `${submission.zone || 'unassigned'}/${submission.photo_filename}`;
+          
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('inspection-photos')
+            .upload(filePath, blob, {
+              contentType: 'image/jpeg',
+              upsert: true
+            });
+            
+          if (uploadError) {
+            console.error('Error uploading photo to Supabase Storage:', uploadError);
+            throw new Error(`Supabase photo upload failed: ${uploadError.message}`);
+          } else {
+            const { data: publicUrlData } = supabase.storage
+                .from('inspection-photos')
+                .getPublicUrl(filePath);
+            supabasePhotoUrl = publicUrlData.publicUrl;
+            console.log('Successfully uploaded photo to Supabase Storage:', supabasePhotoUrl);
+          }
+        } catch (photoErr: any) {
+          console.error('Failed to process and upload photo to Supabase:', photoErr);
+          throw photoErr;
+        }
       }
-      */
 
       // 2. Build row data and write to Google Sheets
-      const rowData = buildSheetRow(submission, photoDriveUrl);
+      const rowData = buildSheetRow(submission, null);
       await appendToSheets(token, sheetId, rowData);
 
-      // 3. Mark as synced in local DB
-      await markAsSyncedInDB(submission.id, photoDriveUrl || undefined);
+      // 3. Write to our FastAPI backend API (which writes to Supabase)
+      const payload = {
+        id: submission.id,
+        plant_id: submission.plant_id || '',
+        zone: submission.zone || '',
+        block: submission.block || '',
+        supervisor_name: submission.supervisor_name || null,
+        supervisor_email: submission.supervisor_email || null,
+        watering_status: submission.watering_status || null,
+        sunlight_level: submission.sunlight_level || null,
+        shade_level: submission.shade_level || null,
+        soil_ph: submission.soil_pH !== undefined && submission.soil_pH !== null ? Number(submission.soil_pH) : null,
+        temperature_c: submission.temperature_c !== undefined && submission.temperature_c !== null ? Number(submission.temperature_c) : null,
+        humidity_pct: submission.humidity_pct !== undefined && submission.humidity_pct !== null ? Number(submission.humidity_pct) : null,
+        soil_type: submission.soil_type || null,
+        fertiliser_type: Array.isArray(submission.fertiliser_type) ? submission.fertiliser_type : (submission.fertiliser_type ? [submission.fertiliser_type] : null),
+        last_fertilised: submission.last_fertilised || null,
+        fertiliser_used: submission.fertiliser_used || null,
+        vine_height_cm: submission.vine_height_cm !== undefined && submission.vine_height_cm !== null ? Number(submission.vine_height_cm) : null,
+        height_delta_cm: submission.height_delta_cm !== undefined && submission.height_delta_cm !== null ? Number(submission.height_delta_cm) : null,
+        foliage_color: submission.foliage_color || null,
+        planting_arrangement: submission.planting_arrangement || null,
+        notes: submission.field_notes || submission.notes || null,
+        photo_filename: submission.photo_filename || null,
+        photo_url: supabasePhotoUrl || submission.photo_url || null,
+        status: 'synced',
+        sync_status: 'synced',
+        submitted_at: submission.submitted_at || new Date().toISOString()
+      };
+
+      const response = await fetch(`${backendUrl}/api/submissions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errMsg = await response.text();
+        throw new Error(`FastAPI submission sync failed for ${submission.id}: ${errMsg}`);
+      }
+      
+      console.log(`Successfully synced submission ${submission.id} to FastAPI backend.`);
+
+      // 4. Mark as synced in local DB
+      await markAsSyncedInDB(submission.id, supabasePhotoUrl || undefined);
       synced++;
     } catch (err: any) {
       console.error(`Sync failed for submission ${submission.id}:`, err);
@@ -149,6 +213,38 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
         break;
       }
     }
+  }
+
+  // Also sync mortality reports to the FastAPI backend
+  try {
+    const mortalityReports = await getMortalityReports();
+    for (const report of mortalityReports) {
+      const payload = {
+        id: report.id,
+        zone: report.zone,
+        block: report.block,
+        dead_support_trees: Number(report.dead_support_trees || 0),
+        dead_vines: Number(report.dead_vines || 0),
+        reported_at: report.reportedAt || report.reported_at || new Date().toISOString()
+      };
+      
+      const response = await fetch(`${backendUrl}/api/mortality`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) {
+        const errMsg = await response.text();
+        console.error(`FastAPI mortality sync failed for ${report.id}:`, errMsg);
+      } else {
+        console.log(`Successfully synced mortality report ${report.id} to FastAPI backend.`);
+      }
+    }
+  } catch (mortErr) {
+    console.error('Error syncing mortality reports to FastAPI:', mortErr);
   }
 
   // Trigger UI refresh

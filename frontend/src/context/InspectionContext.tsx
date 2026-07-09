@@ -40,8 +40,6 @@ export interface InspectionFormState {
   height_delta_cm: number | null;
   foliage_color: string | null;  // 'Green' | 'Yellow' | 'Brown' | 'Red' | 'Mixed'
   planting_arrangement: string | null; // 'Square' | 'Rectangular' | etc.
-  dead_support_trees: number;
-  dead_vines_count: number;
 
   // Step 5 — Photo & submit
   photo_file: File | null;
@@ -83,8 +81,6 @@ export const initialFormState: InspectionFormState = {
   height_delta_cm: null,
   foliage_color: null,
   planting_arrangement: null,
-  dead_support_trees: 0,
-  dead_vines_count: 0,
 
   photo_file: null,
   photo_filename: null,

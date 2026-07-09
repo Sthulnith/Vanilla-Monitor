@@ -1,0 +1,41 @@
+services:
+  # 1. FastAPI Backend (Python Web Service)
+  - type: web
+    name: vanilla-monitor-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # You can add other backend env vars here if needed
+
+  # 2. Next.js Frontend (Node Web Service)
+  - type: web
+    name: vanilla-monitor-frontend
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_BACKEND_URL
+        sync: false # Set to your deployed backend URL: https://vanilla-monitor-backend.onrender.com
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        sync: false
+      - key: NEXT_PUBLIC_SPREADSHEET_ID
+        sync: false
+      - key: NEXT_PUBLIC_DRIVE_ZONE_A_FOLDER_ID
+        sync: false
+      - key: NEXT_PUBLIC_DRIVE_ZONE_B_FOLDER_ID
+        sync: false
+      - key: NEXT_PUBLIC_DRIVE_ZONE_C_FOLDER_ID
+        sync: false
+      - key: NEXT_PUBLIC_DRIVE_ZONE_D_FOLDER_ID
+        sync: false

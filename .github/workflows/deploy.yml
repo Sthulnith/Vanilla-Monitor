@@ -1,0 +1,73 @@
+name: Build and Deploy to GHCR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 1. Build & Push Backend Image
+      - name: Build and push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/vanilla-monitor-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 2. Build & Push Frontend Image
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_BACKEND_URL=https://vanilla-monitor-backend.onrender.com
+            NEXT_PUBLIC_SUPABASE_URL=https://gyieysknzegebtrsyoof.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_vbXnUH3ji7rhXz2e10pe1Q_tAEBZtEN
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=1042875980541-9ae7r45eiekqa8iak0vqjj7atl6a630e.apps.googleusercontent.com
+            NEXT_PUBLIC_SPREADSHEET_ID=1o4--rtB8-AAhF5YkV2j9RGq8n1mRPV5EWCYGVi2k8-Q
+          tags: ghcr.io/${{ github.repository_owner }}/vanilla-monitor-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 3. Trigger Render Deploy (Backend)
+      - name: Trigger Render Deploy (Backend)
+        if: env.BACKEND_HOOK != ''
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+        run: curl -X POST "$BACKEND_HOOK"
+
+      # 4. Trigger Render Deploy (Frontend)
+      - name: Trigger Render Deploy (Frontend)
+        if: env.FRONTEND_HOOK != ''
+        env:
+          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+        run: curl -X POST "$FRONTEND_HOOK"

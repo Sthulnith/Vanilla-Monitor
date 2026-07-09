@@ -1,49 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { User, Settings, Database, LogOut, Save, ShieldAlert, Check } from 'lucide-react';
+import { User, Database, LogOut, ShieldAlert } from 'lucide-react';
 import { getUserProfile, logoutGoogle } from '../../lib/authService';
 import { getSubmissionsCount, getMortalityCount, clearAllTables } from '../../lib/offline-db';
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null);
-  
-  // Storage settings
-  const [spreadsheetId, setSpreadsheetId] = useState('');
-  const [driveA, setDriveA] = useState('');
-  const [driveB, setDriveB] = useState('');
-  const [driveC, setDriveC] = useState('');
-  const [driveD, setDriveD] = useState('');
 
   // DB stats
   const [recordsCount, setRecordsCount] = useState(0);
   const [mortalityCount, setMortalityCount] = useState(0);
-  
-  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const loadData = async () => {
     // Auth profile
     const p = getUserProfile();
     setProfile(p);
-
-    // Load API configs from localstorage / environment defaults
-    if (typeof window !== 'undefined') {
-      setSpreadsheetId(
-        localStorage.getItem('spreadsheet_id') || process.env.NEXT_PUBLIC_SPREADSHEET_ID || ''
-      );
-      setDriveA(
-        localStorage.getItem('drive_zone_A_folder_id') || process.env.NEXT_PUBLIC_DRIVE_ZONE_A_FOLDER_ID || ''
-      );
-      setDriveB(
-        localStorage.getItem('drive_zone_B_folder_id') || process.env.NEXT_PUBLIC_DRIVE_ZONE_B_FOLDER_ID || ''
-      );
-      setDriveC(
-        localStorage.getItem('drive_zone_C_folder_id') || process.env.NEXT_PUBLIC_DRIVE_ZONE_C_FOLDER_ID || ''
-      );
-      setDriveD(
-        localStorage.getItem('drive_zone_D_folder_id') || process.env.NEXT_PUBLIC_DRIVE_ZONE_D_FOLDER_ID || ''
-      );
-    }
 
     // Counts
     const rCount = await getSubmissionsCount();
@@ -55,20 +27,6 @@ export default function ProfilePage() {
   useEffect(() => {
     loadData();
   }, []);
-
-  const handleSaveConfigs = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('spreadsheet_id', spreadsheetId);
-      localStorage.setItem('drive_zone_A_folder_id', driveA);
-      localStorage.setItem('drive_zone_B_folder_id', driveB);
-      localStorage.setItem('drive_zone_C_folder_id', driveC);
-      localStorage.setItem('drive_zone_D_folder_id', driveD);
-      
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-    }
-  };
 
   const [syncing, setSyncing] = useState(false);
 
@@ -143,96 +101,6 @@ export default function ProfilePage() {
             </button>
           </div>
         )}
-
-        {/* GOOGLE DRIVE & SHEETS CONFIG */}
-        <div className="bg-white rounded-2xl border border-border-light p-5 shadow-xs space-y-4">
-          <h3 className="text-xs font-bold text-secondary uppercase tracking-widest flex items-center gap-1.5 border-b border-border-light/50 pb-2">
-            <Settings className="h-4 w-4" />
-            Google API Integrations
-          </h3>
-
-          <form onSubmit={handleSaveConfigs} className="space-y-3">
-            <div>
-              <label className="text-[9px] font-bold text-text-secondary uppercase">Spreadsheet ID</label>
-              <input
-                type="text"
-                value={spreadsheetId}
-                onChange={(e) => setSpreadsheetId(e.target.value)}
-                placeholder="Google Sheet Resource ID"
-                className="w-full mt-1 border border-border-light rounded-lg p-2.5 text-xs font-mono focus:outline-primary"
-              />
-            </div>
-
-            <div className="my-2 border-t border-border-light/40 pt-2">
-              <span className="text-[9px] font-bold text-text-secondary uppercase block mb-2">
-                Google Drive Zone Folder IDs
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[8px] font-bold text-text-secondary uppercase">Zone A Folder</label>
-                  <input
-                    type="text"
-                    value={driveA}
-                    onChange={(e) => setDriveA(e.target.value)}
-                    placeholder="Folder ID"
-                    className="w-full mt-1 border border-border-light rounded-lg p-2 text-[10px] font-mono focus:outline-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-[8px] font-bold text-text-secondary uppercase">Zone B Folder</label>
-                  <input
-                    type="text"
-                    value={driveB}
-                    onChange={(e) => setDriveB(e.target.value)}
-                    placeholder="Folder ID"
-                    className="w-full mt-1 border border-border-light rounded-lg p-2 text-[10px] font-mono focus:outline-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-[8px] font-bold text-text-secondary uppercase">Zone C Folder</label>
-                  <input
-                    type="text"
-                    value={driveC}
-                    onChange={(e) => setDriveC(e.target.value)}
-                    placeholder="Folder ID"
-                    className="w-full mt-1 border border-border-light rounded-lg p-2 text-[10px] font-mono focus:outline-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-[8px] font-bold text-text-secondary uppercase">Zone D Folder</label>
-                  <input
-                    type="text"
-                    value={driveD}
-                    onChange={(e) => setDriveD(e.target.value)}
-                    placeholder="Folder ID"
-                    className="w-full mt-1 border border-border-light rounded-lg p-2 text-[10px] font-mono focus:outline-primary"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className={`w-full py-3 rounded-full text-xs font-bold shadow-md flex items-center justify-center gap-1.5 transition-all ${
-                saveSuccess
-                  ? 'bg-pale-green border border-primary text-primary'
-                  : 'bg-[#1B4332] text-white hover:bg-primary'
-              }`}
-            >
-              {saveSuccess ? (
-                <>
-                  <Check className="h-4 w-4" />
-                  Configurations Saved!
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4" />
-                  Save Configurations
-                </>
-              )}
-            </button>
-          </form>
-        </div>
 
         {/* CACHE & STORAGE MANAGEMENT */}
         <div className="bg-white rounded-2xl border border-border-light p-5 shadow-xs space-y-4">

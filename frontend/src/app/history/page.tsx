@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight } from 'lucide-react';
-import { getSubmissions, getPendingCount } from '../../lib/offline-db';
+import { getPendingSubmissions } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
+
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 export default function HistoryPage() {
   const [submissions, setSubmissions] = useState<any[]>([]);
@@ -20,64 +22,25 @@ export default function HistoryPage() {
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
 
   const loadSubmissions = async () => {
-    let list = await getSubmissions();
-    const noSeed = typeof window !== 'undefined' && localStorage.getItem('no_seed') === 'true';
-    if (list.length === 0 && !noSeed) {
-      console.log('Seeding mock submissions for History testing...');
-      const mockSynced = {
-        id: 'mock-sub-1',
-        zone: 'A',
-        block: '01',
-        plant_number: 100,
-        plant_id: 'A01-P100',
-        common_name: 'Vanilla',
-        variety: 'Planifolia',
-        vine_height_cm: 120,
-        soil_pH: 6.2,
-        watering_status: 'Keep moist',
-        sunlight_level: 'Bright indirect',
-        fertiliser_used: 'Bio-Organic',
-        fertiliser_type: ['All purpose'],
-        field_notes: 'Foliage looks exceptionally healthy. No sign of root rot.',
-        sync_status: 'synced',
-        status: 'synced',
-        submitted_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        created_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        supervisor_name: 'Chaminda Rajapaksa',
-        supervisor_email: 'chaminda.r@sapori.lk',
-        foliage_color: 'Green',
-        plant_type: 'Cutting'
-      };
-      const mockPending = {
-        id: 'mock-sub-2',
-        zone: 'B',
-        block: '03',
-        plant_number: 12,
-        plant_id: 'B03-P012',
-        common_name: 'Vanilla',
-        variety: 'Planifolia',
-        vine_height_cm: 85,
-        soil_pH: 6.0,
-        watering_status: 'Partially dry',
-        sunlight_level: 'Medium',
-        fertiliser_used: 'Nitrogen-Rich Organic',
-        fertiliser_type: ['Orchid'],
-        field_notes: 'Slight yellowing near margins of the lower leaves.',
-        sync_status: 'pending',
-        status: 'pending',
-        submitted_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        supervisor_name: 'Chaminda Rajapaksa',
-        supervisor_email: 'chaminda.r@sapori.lk',
-        foliage_color: 'Yellow',
-        plant_type: 'Cutting'
-      };
+    // Locally queued submissions that haven't synced to Supabase yet.
+    const pending = await getPendingSubmissions();
 
-      const { saveSubmissionOffline } = await import('../../lib/offline-db');
-      await saveSubmissionOffline(mockSynced);
-      await saveSubmissionOffline(mockPending);
-      list = await getSubmissions();
+    // Submissions already stored in Supabase, fetched via the backend.
+    let remote: any[] = [];
+    try {
+      const res = await fetch(`${backendUrl}/api/submissions`);
+      if (res.ok) {
+        const body = await res.json();
+        remote = body.data || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch submissions from backend:', err);
     }
+
+    // Merge, preferring local pending records over any stale remote copy of the same id.
+    const remoteFiltered = remote.filter(r => !pending.some(p => p.id === r.id));
+    const list = [...pending, ...remoteFiltered];
+
     // Sort descending by date
     const sorted = [...list].sort(
       (a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime()
@@ -160,7 +123,7 @@ export default function HistoryPage() {
         setSelectedPhotoUrl(null);
       }
     } else {
-      setSelectedPhotoUrl(sub.photo_drive_url || null);
+      setSelectedPhotoUrl(sub.photo_url || null);
     }
   };
 
