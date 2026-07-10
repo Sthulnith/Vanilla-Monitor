@@ -11,6 +11,9 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    env:
+      OWNER_LC: ''
+      RENDER_BACKEND_DEPLOY_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
     permissions:
       contents: read
       packages: write
@@ -21,7 +24,7 @@ jobs:
 
       - name: Downcase repository owner name
         run: |
-          echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
+          echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -46,7 +49,5 @@ jobs:
 
       # 2. Trigger Render Deploy (Backend)
       - name: Trigger Render Deploy (Backend)
-        if: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK != '' }}
-        env:
-          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
-        run: curl -X POST "$BACKEND_HOOK"
+        if: env.RENDER_BACKEND_DEPLOY_HOOK != ''
+        run: curl -X POST "${{ env.RENDER_BACKEND_DEPLOY_HOOK }}"
