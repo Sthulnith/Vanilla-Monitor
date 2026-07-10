@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight } from 'lucide-react';
-import { getPendingSubmissions } from '../../lib/offline-db';
+import { getPendingSubmissions, getPendingInspections } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
@@ -22,27 +22,60 @@ export default function HistoryPage() {
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
 
   const loadSubmissions = async () => {
-    // Locally queued submissions that haven't synced to Supabase yet.
-    const pending = await getPendingSubmissions();
+    // 1. Fetch pending records from IndexedDB
+    const pendingSubs = await getPendingSubmissions();
+    const pendingInsps = await getPendingInspections();
 
-    // Submissions already stored in Supabase, fetched via the backend.
-    let remote: any[] = [];
+    // 2. Fetch synced records from backend
+    let remoteSubs: any[] = [];
     try {
       const res = await fetch(`${backendUrl}/api/submissions`);
       if (res.ok) {
         const body = await res.json();
-        remote = body.data || [];
+        remoteSubs = body.data || [];
       }
     } catch (err) {
-      console.error('Failed to fetch submissions from backend:', err);
+      console.error('Failed to fetch legacy submissions:', err);
     }
 
-    // Merge, preferring local pending records over any stale remote copy of the same id.
-    const remoteFiltered = remote.filter(r => !pending.some(p => p.id === r.id));
-    const list = [...pending, ...remoteFiltered];
+    let remoteInsps: any[] = [];
+    try {
+      const res = await fetch(`${backendUrl}/api/inspections`);
+      if (res.ok) {
+        const body = await res.json();
+        remoteInsps = body.data || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch inspections:', err);
+    }
+
+    // Filter remote records to avoid duplicates with pending offline records
+    const remoteSubsFiltered = remoteSubs.filter(r => !pendingSubs.some(p => p.id === r.id));
+    const remoteInspsFiltered = remoteInsps.filter(r => !pendingInsps.some(p => p.id === r.id));
+
+    // Map new inspections to have compatible display fields
+    const mappedInsps = [...pendingInsps, ...remoteInspsFiltered].map(i => ({
+      ...i,
+      submitted_at: i.created_at || i.inspection_date,
+      field_notes: i.notes,
+      soil_pH: i.soil_ph,
+      fertiliser_type: i.fertilizer_type || [],
+      fertiliser_used: i.fertilizer_used,
+      last_fertilised: i.last_fertilized,
+      zone: i.zone || i.plant_id?.split('-')[0]?.charAt(0) || 'A',
+      block: i.block || i.plant_id?.split('-')[0]?.substring(1) || '01',
+      common_name: i.common_name || 'Vanilla',
+      variety: i.variety || 'Local'
+    }));
+
+    const allSubmissions = [
+      ...pendingSubs,
+      ...remoteSubsFiltered,
+      ...mappedInsps
+    ];
 
     // Sort descending by date
-    const sorted = [...list].sort(
+    const sorted = [...allSubmissions].sort(
       (a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime()
     );
     setSubmissions(sorted);

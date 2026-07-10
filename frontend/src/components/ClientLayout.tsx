@@ -90,16 +90,16 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   }
 
   // If authenticated
-  const isInspection = pathname?.startsWith('/inspect');
+  const hasOwnFooterNav = pathname?.startsWith('/inspect') || pathname?.startsWith('/add-plant');
 
   return (
     <InspectionProvider>
-      <div className={`flex min-h-screen flex-col bg-surface ${isInspection ? '' : 'pb-16'}`}>
+      <div className={`flex min-h-screen flex-col bg-surface ${hasOwnFooterNav ? '' : 'pb-16'}`}>
         <OfflineBanner />
         <main className="flex-1 w-full max-w-md mx-auto bg-white shadow-sm min-h-[calc(100vh-4rem)] relative pb-6 border-x border-border-light">
           {children}
         </main>
-        {!isInspection && <BottomNav />}
+        {!hasOwnFooterNav && <BottomNav />}
       </div>
     </InspectionProvider>
   );

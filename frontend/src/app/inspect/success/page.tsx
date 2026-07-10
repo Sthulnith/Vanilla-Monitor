@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, ArrowRight, Home, Smartphone, Check } from 'lucide-react';
-import { getSubmission } from '../../../lib/offline-db';
+import { getSubmission, getInspection } from '../../../lib/offline-db';
 
 export default function InspectionSuccess() {
   const router = useRouter();
@@ -20,7 +20,7 @@ export default function InspectionSuccess() {
 
     const fetchDetails = async () => {
       if (submissionId) {
-        const sub = await getSubmission(submissionId);
+        const sub = await getSubmission(submissionId) || await getInspection(submissionId);
 
         if (sub) {
           setDetails(sub);
@@ -112,7 +112,7 @@ export default function InspectionSuccess() {
         {/* Action Buttons */}
         <div className="space-y-3 mt-8">
           <button
-            onClick={() => router.push('/inspect/step1')}
+            onClick={() => router.push('/inspect')}
             className="flex w-full items-center justify-center gap-2 rounded-full bg-[#1B4332] px-6 py-3.5 text-xs font-bold text-white shadow-md hover:bg-primary transition active:scale-95"
           >
             <span>Inspect Another Plant</span>

@@ -10,7 +10,11 @@ import {
   Plus,
   X,
   TrendingUp,
-  MapPin
+  MapPin,
+  Sprout,
+  Search,
+  FileText,
+  Skull
 } from 'lucide-react';
 import { getUserProfile, logoutGoogle } from '../../lib/authService';
 import {
@@ -252,14 +256,25 @@ export default function DashboardPage() {
           <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary mb-3">Quick Actions</h2>
           <div className="grid grid-cols-2 gap-3">
             <Link
-              href="/inspect/step1"
+              href="/add-plant"
               className="bg-white rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
             >
               <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
-                <Plus className="h-5 w-5" />
+                <Sprout className="h-5 w-5" />
               </div>
-              <span className="text-sm font-bold text-text-primary">New inspection</span>
-              <span className="text-[10px] text-text-secondary mt-0.5">Fill FVP 05 form</span>
+              <span className="text-sm font-bold text-text-primary">Add New Plant</span>
+              <span className="text-[10px] text-text-secondary mt-0.5">Register static plant details</span>
+            </Link>
+
+            <Link
+              href="/inspect"
+              className="bg-white rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
+            >
+              <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
+                <Search className="h-5 w-5" />
+              </div>
+              <span className="text-sm font-bold text-text-primary">New Inspection</span>
+              <span className="text-[10px] text-text-secondary mt-0.5">Scan QR or select plant</span>
             </Link>
 
             <button
@@ -269,7 +284,7 @@ export default function DashboardPage() {
               <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
                 <Camera className="h-5 w-5" />
               </div>
-              <span className="text-sm font-bold text-text-primary">Quick photo</span>
+              <span className="text-sm font-bold text-text-primary">Quick Photo</span>
               <span className="text-[10px] text-text-secondary mt-0.5">Attach image directly</span>
             </button>
 
@@ -278,23 +293,27 @@ export default function DashboardPage() {
               className="bg-white rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
             >
               <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
-                <History className="h-5 w-5" />
+                <FileText className="h-5 w-5" />
               </div>
-              <span className="text-sm font-bold text-text-primary">My submissions</span>
+              <span className="text-sm font-bold text-text-primary">My Submissions</span>
               <span className="text-[10px] text-text-secondary mt-0.5">
-                {stats.recentSubmissions.length} local records
+                View logged inspection reports
               </span>
             </Link>
 
             <button
               onClick={() => setIsDeadModalOpen(true)}
-              className="bg-white text-left rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
+              className="bg-white text-left rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200 col-span-2"
             >
-              <div className="h-10 w-10 bg-red-100 text-red-700 rounded-xl flex items-center justify-center mb-3">
-                <AlertTriangle className="h-5 w-5" />
+              <div className="flex items-center gap-3 w-full">
+                <div className="h-10 w-10 bg-red-100 text-red-700 rounded-xl flex items-center justify-center animate-pulse">
+                  <Skull className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <span className="text-sm font-bold text-text-primary block">Dead Vine Report</span>
+                  <span className="text-[10px] text-text-secondary mt-0.5 block">Log vine/support tree mortality</span>
+                </div>
               </div>
-              <span className="text-sm font-bold text-text-primary">Dead vine report</span>
-              <span className="text-[10px] text-text-secondary mt-0.5">Log vine mortality</span>
             </button>
           </div>
         </div>

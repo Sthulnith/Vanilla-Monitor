@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Map, Info, AlertTriangle, CheckCircle, ChevronRight, X, Bug } from 'lucide-react';
 import { PLANTATION, getTrackedPlants } from '../../lib/plantData';
-import { getSubmissions, getMortalityReports } from '../../lib/offline-db';
+import { getSubmissions, getMortalityReports, getPlants } from '../../lib/offline-db';
 import { useInspection } from '../../context/InspectionContext';
 
 export default function DigitalTwinPage() {
@@ -13,9 +13,18 @@ export default function DigitalTwinPage() {
 
   const [activeZoneFilter, setActiveZoneFilter] = useState<string>('All');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
+  const [registeredPlants, setRegisteredPlants] = useState<any[]>([]);
   
   // Health metrics per block
   const [blockStatus, setBlockStatus] = useState<Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }>>({});
+
+  useEffect(() => {
+    const loadPlants = async () => {
+      const list = await getPlants();
+      setRegisteredPlants(list);
+    };
+    loadPlants();
+  }, []);
 
   useEffect(() => {
     const calculateBlockHealth = async () => {
@@ -228,23 +237,71 @@ export default function DigitalTwinPage() {
                 </div>
               </div>
 
+              {/* Registered Plants in this Block */}
+              <div>
+                <span className="text-[9px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
+                  Registered Plants in Block {selectedBlock.id}
+                </span>
+                {registeredPlants.filter(p => p.zone === selectedBlock.zone && p.block === selectedBlock.id).length === 0 ? (
+                  <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2 font-medium">
+                    No plants registered in this block yet. Tap a sample below or use '+ Add New Plant'.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {registeredPlants
+                      .filter(p => p.zone === selectedBlock.zone && p.block === selectedBlock.id)
+                      .map((p) => (
+                        <button
+                          key={p.plant_id}
+                          onClick={() => {
+                            router.push(`/inspect/form?plant_id=${p.plant_id}`);
+                            setSelectedBlock(null);
+                          }}
+                          className="px-2.5 py-1 bg-primary text-white rounded-lg text-xs font-bold hover:bg-primary/95 transition-all shadow-xs"
+                        >
+                          {p.plant_id}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
               {/* Sampled target plants list */}
               <div>
                 <span className="text-[9px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
-                  Sampled Inspection Plants
+                  Sampled Inspection Indices
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {getTrackedPlants(selectedBlock.zone, selectedBlock.id).map((pNum) => (
-                    <span
-                      key={pNum}
-                      className="px-2.5 py-1 bg-pale-green text-primary border border-primary/10 rounded-lg text-xs font-semibold"
-                    >
-                      #{String(pNum).padStart(3, '0')}
-                    </span>
-                  ))}
+                  {getTrackedPlants(selectedBlock.zone, selectedBlock.id).map((pNum) => {
+                    const sampleId = `${selectedBlock.zone}${selectedBlock.id.padStart(2, '0')}-P${String(pNum).padStart(3, '0')}`;
+                    const isRegistered = registeredPlants.some(p => p.plant_id === sampleId);
+
+                    return (
+                      <button
+                        key={pNum}
+                        onClick={() => {
+                          if (isRegistered) {
+                            router.push(`/inspect/form?plant_id=${sampleId}`);
+                          } else {
+                            if (confirm(`Plant ${sampleId} is not registered yet. Would you like to register it now?`)) {
+                              router.push(`/add-plant?zone=${selectedBlock.zone}&block=${selectedBlock.id}&plant_no=${pNum}`);
+                            }
+                          }
+                          setSelectedBlock(null);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                          isRegistered
+                            ? 'bg-pale-green text-primary border-primary/20 hover:bg-pale-green/80'
+                            : 'bg-surface text-text-secondary border-border-light hover:bg-border-light'
+                        }`}
+                      >
+                        #{String(pNum).padStart(3, '0')} {isRegistered ? '✓' : '+'}
+                      </button>
+                    );
+                  })}
                 </div>
                 <p className="text-[9px] text-text-secondary mt-1.5 leading-normal">
-                  Field supervisors are required to sample these exact indices for statistical validation.
+                  Supervisors must sample these indices. Click to inspect (✓) or register (+).
                 </p>
               </div>
 
@@ -252,13 +309,13 @@ export default function DigitalTwinPage() {
               <div className="space-y-2 pt-2 border-t border-border-light">
                 <button
                   onClick={() => {
-                    handleStartInspection(selectedBlock.zone, selectedBlock.id);
+                    router.push(`/add-plant?zone=${selectedBlock.zone}&block=${selectedBlock.id}`);
                     setSelectedBlock(null);
                   }}
                   className="w-full bg-[#1B4332] text-white py-3 rounded-full text-xs font-bold hover:bg-primary transition shadow-md flex items-center justify-center gap-1.5"
                 >
                   <Bug className="h-4 w-4" />
-                  Inspect Block {selectedBlock.id}
+                  Register Plant in Block {selectedBlock.id}
                 </button>
                 <button
                   onClick={() => setSelectedBlock(null)}
