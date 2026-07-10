@@ -12,7 +12,7 @@ import {
   TrendingUp,
   MapPin,
   Sprout,
-  Search,
+  ScanLine,
   FileText,
   Skull
 } from 'lucide-react';
@@ -271,7 +271,7 @@ export default function DashboardPage() {
               className="bg-white rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
             >
               <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
-                <Search className="h-5 w-5" />
+                <ScanLine className="h-5 w-5" />
               </div>
               <span className="text-sm font-bold text-text-primary">New Inspection</span>
               <span className="text-[10px] text-text-secondary mt-0.5">Scan QR or select plant</span>

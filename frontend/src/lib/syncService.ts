@@ -170,7 +170,8 @@ export async function saveInspectionOffline(formData: any, photoBlob: Blob | nul
 }
 
 /**
- * Uploads all pending plants, plant locations, inspections, and legacy submissions to Supabase/FastAPI & Google Sheets.
+ * Uploads all pending plants, plant locations, inspections, and legacy submissions
+ * directly to Supabase & Google Sheets (no backend required).
  */
 export async function syncPendingSubmissions(): Promise<{ synced: number; failed: number }> {
   if (typeof window === 'undefined') return { synced: 0, failed: 0 };
@@ -183,12 +184,11 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
 
   const token = localStorage.getItem('google_access_token');
   const sheetId = localStorage.getItem('spreadsheet_id') || process.env.NEXT_PUBLIC_SPREADSHEET_ID || '';
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
   let synced = 0;
   let failed = 0;
 
-  // 1. Sync Pending Plants
+  // 1. Sync Pending Plants → Supabase directly
   try {
     const pendingPlants = await getPendingPlants();
     for (const plant of pendingPlants) {
@@ -196,14 +196,12 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
         const payload = { ...plant };
         delete payload.sync_status;
 
-        const response = await fetch(`${backendUrl}/api/plants`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const { error } = await supabase
+          .from('plants')
+          .upsert(payload, { onConflict: 'plant_id' });
 
-        if (!response.ok) {
-          throw new Error(await response.text());
+        if (error) {
+          throw new Error(error.message);
         }
 
         await markPlantAsSynced(plant.plant_id);
@@ -217,7 +215,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing plants:', err);
   }
 
-  // 2. Sync Pending Plant Locations
+  // 2. Sync Pending Plant Locations → Supabase directly
   try {
     const pendingLocations = await getPendingPlantLocations();
     for (const loc of pendingLocations) {
@@ -225,14 +223,12 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
         const payload = { ...loc };
         delete payload.sync_status;
 
-        const response = await fetch(`${backendUrl}/api/plant_locations`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const { error } = await supabase
+          .from('plant_locations')
+          .upsert(payload, { onConflict: 'plant_id' });
 
-        if (!response.ok) {
-          throw new Error(await response.text());
+        if (error) {
+          throw new Error(error.message);
         }
 
         await markPlantLocationAsSynced(loc.plant_id);
@@ -246,7 +242,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing plant locations:', err);
   }
 
-  // 3. Sync Pending Inspections (New Structure)
+  // 3. Sync Pending Inspections (New Structure) → Supabase directly
   try {
     const pendingInspections = await getPendingInspections();
     for (const inspection of pendingInspections) {
@@ -328,6 +324,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           await appendToSheets(token, sheetId, rowData);
         }
 
+        // Insert into Supabase inspections table directly
         const payload = {
           id: inspection.id,
           plant_id: inspection.plant_id,
@@ -353,14 +350,12 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           sync_status: 'synced'
         };
 
-        const response = await fetch(`${backendUrl}/api/inspections`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const { error } = await supabase
+          .from('inspections')
+          .upsert(payload, { onConflict: 'id' });
 
-        if (!response.ok) {
-          throw new Error(await response.text());
+        if (error) {
+          throw new Error(error.message);
         }
 
         await markInspectionAsSynced(inspection.id, supabasePhotoUrl || undefined);
@@ -374,7 +369,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing inspections:', err);
   }
 
-  // 4. Sync Pending Submissions (Legacy)
+  // 4. Sync Pending Submissions (Legacy) → Supabase inspections table
   try {
     const pendingSubmissions = await getPendingSubmissions();
     for (const submission of pendingSubmissions) {
@@ -407,43 +402,36 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           await appendToSheets(token, sheetId, rowData);
         }
 
+        // Upsert legacy submission as an inspection record in Supabase
         const payload = {
           id: submission.id,
-          plant_id: submission.plant_id || '',
-          zone: submission.zone || '',
-          block: submission.block || '',
+          plant_id: submission.plant_id || `${submission.zone}${submission.block}-P${String(submission.plant_number || '001').padStart(3, '0')}`,
+          inspection_date: submission.submitted_at || new Date().toISOString(),
           supervisor_name: submission.supervisor_name || null,
           supervisor_email: submission.supervisor_email || null,
           watering_status: submission.watering_status || null,
           sunlight_level: submission.sunlight_level || null,
           shade_level: submission.shade_level || null,
-          soil_ph: submission.soil_pH !== undefined && submission.soil_pH !== null ? Number(submission.soil_pH) : null,
-          temperature_c: submission.temperature_c !== undefined && submission.temperature_c !== null ? Number(submission.temperature_c) : null,
-          humidity_pct: submission.humidity_pct !== undefined && submission.humidity_pct !== null ? Number(submission.humidity_pct) : null,
           soil_type: submission.soil_type || null,
-          fertiliser_type: Array.isArray(submission.fertiliser_type) ? submission.fertiliser_type : (submission.fertiliser_type ? [submission.fertiliser_type] : null),
-          last_fertilised: submission.last_fertilised || null,
-          fertiliser_used: submission.fertiliser_used || null,
+          soil_ph: submission.soil_pH !== undefined && submission.soil_pH !== null ? Number(submission.soil_pH) : null,
+          temperature: submission.temperature_c !== undefined && submission.temperature_c !== null ? Number(submission.temperature_c) : null,
+          humidity: submission.humidity_pct !== undefined && submission.humidity_pct !== null ? Number(submission.humidity_pct) : null,
+          fertilizer_type: Array.isArray(submission.fertiliser_type) ? submission.fertiliser_type : (submission.fertiliser_type ? [submission.fertiliser_type] : null),
+          fertilizer_used: submission.fertiliser_used || null,
+          last_fertilized: submission.last_fertilised || null,
           vine_height_cm: submission.vine_height_cm !== undefined && submission.vine_height_cm !== null ? Number(submission.vine_height_cm) : null,
-          height_delta_cm: submission.height_delta_cm !== undefined && submission.height_delta_cm !== null ? Number(submission.height_delta_cm) : null,
           foliage_color: submission.foliage_color || null,
-          planting_arrangement: submission.planting_arrangement || null,
           notes: submission.field_notes || submission.notes || null,
-          photo_filename: submission.photo_filename || null,
           photo_url: supabasePhotoUrl || submission.photo_url || null,
-          status: 'synced',
-          sync_status: 'synced',
-          submitted_at: submission.submitted_at || new Date().toISOString()
+          sync_status: 'synced'
         };
 
-        const response = await fetch(`${backendUrl}/api/submissions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const { error } = await supabase
+          .from('inspections')
+          .upsert(payload, { onConflict: 'id' });
 
-        if (!response.ok) {
-          throw new Error(await response.text());
+        if (error) {
+          throw new Error(error.message);
         }
 
         await markAsSyncedInDB(submission.id, supabasePhotoUrl || undefined);
@@ -462,7 +450,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing legacy submissions:', err);
   }
 
-  // 5. Sync Mortality Reports
+  // 5. Sync Mortality Reports → Supabase directly
   try {
     const mortalityReports = await getMortalityReports();
     for (const report of mortalityReports) {
@@ -476,11 +464,9 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           reported_at: report.reportedAt || report.reported_at || new Date().toISOString()
         };
         
-        await fetch(`${backendUrl}/api/mortality`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        await supabase
+          .from('mortality_reports')
+          .upsert(payload, { onConflict: 'id' });
       } catch {}
     }
   } catch (err) {

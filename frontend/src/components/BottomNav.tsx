@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Bug, Map, History, User } from 'lucide-react';
+import { Home, ClipboardCheck, Map, History, User } from 'lucide-react';
 
 const ICON_MAP = {
   Home: Home,
-  Bug: Bug,
+  Bug: ClipboardCheck,
   Map: Map,
   History: History,
   User: User,
