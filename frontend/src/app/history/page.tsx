@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight } from 'lucide-react';
 import { getPendingSubmissions, getPendingInspections } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
-
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+import { supabase } from '../../lib/supabaseClient';
 
 export default function HistoryPage() {
   const [submissions, setSubmissions] = useState<any[]>([]);
@@ -26,31 +25,21 @@ export default function HistoryPage() {
     const pendingSubs = await getPendingSubmissions();
     const pendingInsps = await getPendingInspections();
 
-    // 2. Fetch synced records from backend
-    let remoteSubs: any[] = [];
-    try {
-      const res = await fetch(`${backendUrl}/api/submissions`);
-      if (res.ok) {
-        const body = await res.json();
-        remoteSubs = body.data || [];
-      }
-    } catch (err) {
-      console.error('Failed to fetch legacy submissions:', err);
-    }
-
+    // 2. Fetch synced records from Supabase directly
     let remoteInsps: any[] = [];
     try {
-      const res = await fetch(`${backendUrl}/api/inspections`);
-      if (res.ok) {
-        const body = await res.json();
-        remoteInsps = body.data || [];
+      const { data, error } = await supabase
+        .from('inspections')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        remoteInsps = data;
       }
     } catch (err) {
-      console.error('Failed to fetch inspections:', err);
+      console.error('Failed to fetch inspections from Supabase:', err);
     }
 
     // Filter remote records to avoid duplicates with pending offline records
-    const remoteSubsFiltered = remoteSubs.filter(r => !pendingSubs.some(p => p.id === r.id));
     const remoteInspsFiltered = remoteInsps.filter(r => !pendingInsps.some(p => p.id === r.id));
 
     // Map new inspections to have compatible display fields
@@ -70,7 +59,6 @@ export default function HistoryPage() {
 
     const allSubmissions = [
       ...pendingSubs,
-      ...remoteSubsFiltered,
       ...mappedInsps
     ];
 

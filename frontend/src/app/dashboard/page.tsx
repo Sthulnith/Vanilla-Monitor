@@ -12,7 +12,7 @@ import {
   TrendingUp,
   MapPin,
   Sprout,
-  Search,
+  ScanLine,
   FileText,
   Skull
 } from 'lucide-react';
@@ -24,6 +24,7 @@ import {
   saveMortalityReport,
   saveSubmissionOffline
 } from '../../lib/offline-db';
+import { supabase } from '../../lib/supabaseClient';
 import { PLANTATION } from '../../lib/plantData';
 
 export default function DashboardPage() {
@@ -76,28 +77,53 @@ export default function DashboardPage() {
   const [photoNotes, setPhotoNotes] = useState('');
 
   const loadData = async () => {
-    // Load profile
     const p = getUserProfile();
     setProfile(p);
 
-    // Load offline stats
-    const submissions = await getSubmissions();
     const mortality = await getMortalityStats();
     const count = await getPendingCount();
-
     setPendingCount(count);
 
-    // Get last 3 submissions
-    const sorted = [...submissions].sort(
-      (a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime()
-    );
+    // Pull latest 3 inspections from Supabase (joined with plants for zone/block/variety)
+    let recent: any[] = [];
+    try {
+      const { data } = await supabase
+        .from('inspections')
+        .select(`
+          id, plant_id, inspection_date, created_at, foliage_color,
+          soil_ph, watering_status, vine_height_cm, notes, sync_status,
+          plants!left(zone, block, common_name, variety, plant_type)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (data && data.length > 0) {
+        recent = data.map((r: any) => ({
+          ...r,
+          zone: r.plants?.zone || r.plant_id?.charAt(0) || '?',
+          block: r.plants?.block || r.plant_id?.substring(1, 3) || '??',
+          common_name: r.plants?.common_name || 'Vanilla',
+          variety: r.plants?.variety || 'Local',
+          plant_type: r.plants?.plant_type || 'Cutting',
+          soil_pH: r.soil_ph,
+          submitted_at: r.created_at || r.inspection_date,
+          sync_status: r.sync_status || 'synced',
+        }));
+      }
+    } catch {
+      // Offline fallback: use legacy IndexedDB submissions
+      const offline = await getSubmissions();
+      recent = [...offline]
+        .sort((a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime())
+        .slice(0, 3);
+    }
 
     setStats({
       totalPlants: 2187,
       totalBlocks: 19,
       deadVines: mortality.deadVines,
       deadTrees: mortality.deadTrees,
-      recentSubmissions: sorted.slice(0, 3)
+      recentSubmissions: recent,
     });
   };
 
@@ -271,7 +297,7 @@ export default function DashboardPage() {
               className="bg-white rounded-2xl shadow-sm border border-border-light p-4 flex flex-col items-start hover:border-primary/30 transition-all duration-200"
             >
               <div className="h-10 w-10 bg-pale-green text-primary rounded-xl flex items-center justify-center mb-3">
-                <Search className="h-5 w-5" />
+                <ScanLine className="h-5 w-5" />
               </div>
               <span className="text-sm font-bold text-text-primary">New Inspection</span>
               <span className="text-[10px] text-text-secondary mt-0.5">Scan QR or select plant</span>

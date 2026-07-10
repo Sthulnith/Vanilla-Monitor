@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Bug, Map, History, User } from 'lucide-react';
+import { Home, ClipboardCheck, Map, History, User } from 'lucide-react';
 
 const ICON_MAP = {
   Home: Home,
-  Bug: Bug,
+  Bug: ClipboardCheck,
   Map: Map,
   History: History,
   User: User,
@@ -17,7 +17,7 @@ export default function BottomNav() {
 
   const navItems = [
     { href: '/dashboard', label: 'Home', icon: 'Home' as const },
-    { href: '/inspect/step1', label: 'Inspect', icon: 'Bug' as const },
+    { href: '/new-inspection', label: 'Inspect', icon: 'Bug' as const },
     { href: '/digital-twin', label: 'Map', icon: 'Map' as const },
     { href: '/history', label: 'History', icon: 'History' as const },
     { href: '/profile', label: 'Profile', icon: 'User' as const },
@@ -28,7 +28,7 @@ export default function BottomNav() {
       <div className="mx-auto flex h-full max-w-md justify-around items-center">
         {navItems.map((item) => {
           const Icon = ICON_MAP[item.icon];
-          const isActive = pathname === item.href || (item.href.startsWith('/inspect') && pathname?.startsWith('/inspect'));
+          const isActive = pathname === item.href || (item.href === '/new-inspection' && pathname?.startsWith('/new-inspection'));
 
           return (
             <Link

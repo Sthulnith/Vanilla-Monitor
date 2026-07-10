@@ -2,163 +2,94 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Map, Info, AlertTriangle, CheckCircle, ChevronRight, X, Bug } from 'lucide-react';
-import { PLANTATION, getTrackedPlants } from '../../lib/plantData';
-import { getSubmissions, getMortalityReports, getPlants } from '../../lib/offline-db';
-import { useInspection } from '../../context/InspectionContext';
+import { Map, ChevronRight } from 'lucide-react';
+import { PLANTATION } from '../../lib/plantData';
+import { getSubmissions, getMortalityReports } from '../../lib/offline-db';
 
 export default function DigitalTwinPage() {
   const router = useRouter();
-  const { updateForm } = useInspection();
-
-  const [activeZoneFilter, setActiveZoneFilter] = useState<string>('All');
-  const [selectedBlock, setSelectedBlock] = useState<any>(null);
-  const [registeredPlants, setRegisteredPlants] = useState<any[]>([]);
-  
-  // Health metrics per block
-  const [blockStatus, setBlockStatus] = useState<Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }>>({});
+  const [activeZone, setActiveZone] = useState<string>('All');
+  const [blockStatus, setBlockStatus] = useState<
+    Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }>
+  >({});
 
   useEffect(() => {
-    const loadPlants = async () => {
-      const list = await getPlants();
-      setRegisteredPlants(list);
-    };
-    loadPlants();
-  }, []);
-
-  useEffect(() => {
-    const calculateBlockHealth = async () => {
+    const calcHealth = async () => {
       const submissions = await getSubmissions();
       const mortality = await getMortalityReports();
+      const map: Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }> = {};
 
-      const statusMap: Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }> = {};
+      Object.entries(PLANTATION).forEach(([z, zd]) =>
+        zd.blocks.forEach(b => { map[`${z}-${b.id}`] = { status: 'healthy', deadCount: 0 }; })
+      );
 
-      // Initialize all blocks in the plantation
-      Object.entries(PLANTATION).forEach(([zoneKey, zoneData]) => {
-        zoneData.blocks.forEach((block) => {
-          const key = `${zoneKey}-${block.id}`;
-          statusMap[key] = { status: 'healthy', deadCount: 0 };
-        });
-      });
-
-      // Overlay mortality report data
-      mortality.forEach((r) => {
+      mortality.forEach(r => {
         const key = `${r.zone}-${r.block}`;
-        if (statusMap[key]) {
-          statusMap[key].deadCount += r.dead_vines || 0;
-          if (r.dead_vines > 2) {
-            statusMap[key].status = 'danger';
-          } else if (r.dead_vines > 0 && statusMap[key].status !== 'danger') {
-            statusMap[key].status = 'warning';
-          }
+        if (map[key]) {
+          map[key].deadCount += r.dead_vines || 0;
+          if (r.dead_vines > 2) map[key].status = 'danger';
+          else if (r.dead_vines > 0 && map[key].status !== 'danger') map[key].status = 'warning';
         }
       });
 
-      // Overlay inspection submissions
-      submissions.forEach((s) => {
+      submissions.forEach(s => {
         const key = `${s.zone}-${s.block}`;
-        if (statusMap[key]) {
+        if (map[key]) {
           const pH = s.soil_pH ?? s.soil_ph;
-          const foliage = s.foliage_color;
-
-          if (pH < 5.5 || pH > 7.0 || foliage === 'Brown' || foliage === 'Red') {
-            statusMap[key].status = 'danger';
-          } else if (
-            ((pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)) ||
-            foliage === 'Yellow' ||
-            foliage === 'Mixed'
-          ) {
-            if (statusMap[key].status !== 'danger') {
-              statusMap[key].status = 'warning';
-            }
+          const f = s.foliage_color;
+          if (pH < 5.5 || pH > 7.0 || f === 'Brown' || f === 'Red') map[key].status = 'danger';
+          else if (((pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)) || f === 'Yellow' || f === 'Mixed') {
+            if (map[key].status !== 'danger') map[key].status = 'warning';
           }
         }
       });
 
-      setBlockStatus(statusMap);
+      setBlockStatus(map);
     };
-
-    calculateBlockHealth();
+    calcHealth();
   }, []);
 
-  const handleStartInspection = (zone: string, blockId: string) => {
-    updateForm({
-      zone,
-      block: blockId,
-      plant_number: null,
-      plant_id: null
-    });
-    router.push('/inspect/step1');
+  const getStyles = (zone: string, blockId: string) => {
+    const s = blockStatus[`${zone}-${blockId}`]?.status || 'healthy';
+    if (s === 'danger') return {
+      card: 'bg-red-50 border-red-400/60 hover:bg-red-100/60',
+      badge: 'bg-red-500 text-white', label: 'Danger', dot: 'bg-red-500'
+    };
+    if (s === 'warning') return {
+      card: 'bg-amber-50 border-amber-400/60 hover:bg-amber-100/60',
+      badge: 'bg-amber-500 text-white', label: 'Warning', dot: 'bg-amber-500'
+    };
+    return {
+      card: 'bg-green-50/60 border-green-700/25 hover:bg-green-50',
+      badge: 'bg-primary text-white', label: 'Healthy', dot: 'bg-green-500'
+    };
   };
 
-  // Get color styles based on health status
-  const getStatusStyles = (zone: string, blockId: string) => {
-    const key = `${zone}-${blockId}`;
-    const info = blockStatus[key] || { status: 'healthy', deadCount: 0 };
-    switch (info.status) {
-      case 'danger':
-        return {
-          bg: 'bg-red-50 border-red-500/80 hover:bg-red-100/50',
-          text: 'text-red-800',
-          badge: 'bg-red-500 text-white',
-          status: 'danger' as const
-        };
-      case 'warning':
-        return {
-          bg: 'bg-amber-50 border-amber-500/80 hover:bg-amber-100/50',
-          text: 'text-amber-800',
-          badge: 'bg-amber-500 text-white',
-          status: 'warning' as const
-        };
-      default:
-        return {
-          bg: 'bg-green-50/50 border-green-700/30 hover:bg-green-50',
-          text: 'text-green-800',
-          badge: 'bg-primary text-white',
-          status: 'healthy' as const
-        };
-    }
-  };
-
-  // Filter list of blocks to display
-  const displayBlocks: Array<{ zone: string; id: string; plants: number; color: string }> = [];
-  Object.entries(PLANTATION).forEach(([zoneKey, zoneData]) => {
-    if (activeZoneFilter === 'All' || activeZoneFilter === zoneKey) {
-      zoneData.blocks.forEach((b) => {
-        displayBlocks.push({
-          zone: zoneKey,
-          id: b.id,
-          plants: b.plants,
-          color: zoneData.color
-        });
-      });
-    }
+  const blocks: Array<{ zone: string; id: string; plants: number }> = [];
+  Object.entries(PLANTATION).forEach(([z, zd]) => {
+    if (activeZone === 'All' || activeZone === z)
+      zd.blocks.forEach(b => blocks.push({ zone: z, id: b.id, plants: b.plants }));
   });
 
   return (
     <div className="flex flex-col bg-surface min-h-screen">
       {/* Header */}
-      <div className="bg-primary text-white px-5 py-5 flex justify-between items-center rounded-b-3xl shadow-md">
-        <div>
-          <span className="text-[10px] uppercase font-bold tracking-widest text-green-light flex items-center gap-1">
-            <Map className="h-3 w-3" />
-            Digital Twin Map
-          </span>
-          <h1 className="text-xl font-extrabold mt-0.5">Plantation Map</h1>
-          <p className="text-xs text-green-pale/85 mt-0.5 font-medium">19 Blocks • Galagedara, LK</p>
-        </div>
+      <div className="bg-primary text-white px-5 py-5 rounded-b-3xl shadow-md">
+        <span className="text-[10px] uppercase font-bold tracking-widest text-green-light flex items-center gap-1">
+          <Map className="h-3 w-3" /> Digital Twin Map
+        </span>
+        <h1 className="text-xl font-extrabold mt-0.5">Plantation Map</h1>
+        <p className="text-xs text-green-pale/85 mt-0.5 font-medium">19 Blocks • Galagedara, LK</p>
       </div>
 
-      {/* Zone Filters Bar */}
+      {/* Zone filter */}
       <div className="px-4 py-3 flex gap-2 overflow-x-auto scrollbar-none bg-white border-b border-border-light">
-        {['All', 'A', 'B', 'C', 'D'].map((z) => (
+        {['All', 'A', 'B', 'C', 'D'].map(z => (
           <button
             key={z}
-            onClick={() => setActiveZoneFilter(z)}
-            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-              activeZoneFilter === z
-                ? 'bg-primary text-white shadow-xs'
-                : 'bg-pale-green text-primary hover:bg-pale-green/80'
+            onClick={() => setActiveZone(z)}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+              activeZone === z ? 'bg-primary text-white shadow-sm' : 'bg-pale-green text-primary hover:bg-pale-green/80'
             }`}
           >
             {z === 'All' ? 'Show All' : `Zone ${z}`}
@@ -166,168 +97,38 @@ export default function DigitalTwinPage() {
         ))}
       </div>
 
-      {/* Map Grid Area */}
-      <div className="p-5 flex-1 pb-24">
+      {/* Block grid */}
+      <div className="p-5 pb-28">
         <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary mb-3">Plantation Layout</h2>
-        
         <div className="grid grid-cols-2 gap-3">
-          {displayBlocks.map((block) => {
-            const styles = getStatusStyles(block.zone, block.id);
+          {blocks.map(block => {
+            const s = getStyles(block.zone, block.id);
             return (
               <button
                 key={`${block.zone}-${block.id}`}
-                onClick={() => setSelectedBlock(block)}
-                className={`p-4 border rounded-2xl text-left transition-all shadow-xs flex flex-col justify-between h-28 ${styles.bg}`}
+                onClick={() => router.push(`/blocks/${block.zone}/${block.id}`)}
+                className={`p-4 border-2 rounded-2xl text-left transition-all shadow-sm flex flex-col justify-between h-32 active:scale-95 ${s.card}`}
               >
                 <div className="flex justify-between items-start w-full">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-extrabold uppercase opacity-85 tracking-wider">
-                      Zone {block.zone}
-                    </span>
-                    <span className="text-sm font-black mt-0.5">Block {block.id}</span>
+                  <div>
+                    <span className="text-[9px] font-extrabold uppercase opacity-75 tracking-wider block">Zone {block.zone}</span>
+                    <span className="text-base font-black mt-0.5 block">Block {block.id}</span>
                   </div>
-                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${styles.badge}`}>
-                    {styles.status}
+                  <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full uppercase ${s.badge}`}>
+                    {s.label}
                   </span>
                 </div>
-
-                <div className="flex justify-between items-center w-full mt-4 text-[10px] font-bold opacity-80 border-t border-black/5 pt-2">
-                  <span>{block.plants} plants</span>
-                  <span className="underline">View details</span>
+                <div className="flex justify-between items-center w-full border-t border-black/5 pt-2.5">
+                  <span className="text-[10px] font-semibold opacity-75">{block.plants} plants</span>
+                  <span className="text-[10px] font-bold text-primary flex items-center gap-0.5">
+                    View <ChevronRight className="h-3 w-3" />
+                  </span>
                 </div>
               </button>
             );
           })}
         </div>
       </div>
-
-      {/* ─── BLOCK DETAIL MODAL ────────────────────────────────────── */}
-      {selectedBlock && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-border-light animate-in fade-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="bg-primary px-5 py-4 text-white flex justify-between items-center">
-              <div>
-                <span className="text-[9px] uppercase font-bold text-green-light tracking-widest">
-                  Zone {selectedBlock.zone}
-                </span>
-                <h3 className="font-extrabold text-sm mt-0.5">
-                  Block {selectedBlock.id} Specifications
-                </h3>
-              </div>
-              <button onClick={() => setSelectedBlock(null)} className="text-white/80 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[9px] font-bold text-text-secondary uppercase">Total Plants</span>
-                  <span className="text-base font-extrabold text-text-primary block mt-0.5">
-                    {selectedBlock.plants}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[9px] font-bold text-text-secondary uppercase">Dead Vines logged</span>
-                  <span className="text-base font-extrabold text-red-600 block mt-0.5">
-                    {blockStatus[`${selectedBlock.zone}-${selectedBlock.id}`]?.deadCount || 0}
-                  </span>
-                </div>
-              </div>
-
-              {/* Registered Plants in this Block */}
-              <div>
-                <span className="text-[9px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
-                  Registered Plants in Block {selectedBlock.id}
-                </span>
-                {registeredPlants.filter(p => p.zone === selectedBlock.zone && p.block === selectedBlock.id).length === 0 ? (
-                  <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2 font-medium">
-                    No plants registered in this block yet. Tap a sample below or use '+ Add New Plant'.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {registeredPlants
-                      .filter(p => p.zone === selectedBlock.zone && p.block === selectedBlock.id)
-                      .map((p) => (
-                        <button
-                          key={p.plant_id}
-                          onClick={() => {
-                            router.push(`/inspect/form?plant_id=${p.plant_id}`);
-                            setSelectedBlock(null);
-                          }}
-                          className="px-2.5 py-1 bg-primary text-white rounded-lg text-xs font-bold hover:bg-primary/95 transition-all shadow-xs"
-                        >
-                          {p.plant_id}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Sampled target plants list */}
-              <div>
-                <span className="text-[9px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
-                  Sampled Inspection Indices
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {getTrackedPlants(selectedBlock.zone, selectedBlock.id).map((pNum) => {
-                    const sampleId = `${selectedBlock.zone}${selectedBlock.id.padStart(2, '0')}-P${String(pNum).padStart(3, '0')}`;
-                    const isRegistered = registeredPlants.some(p => p.plant_id === sampleId);
-
-                    return (
-                      <button
-                        key={pNum}
-                        onClick={() => {
-                          if (isRegistered) {
-                            router.push(`/inspect/form?plant_id=${sampleId}`);
-                          } else {
-                            if (confirm(`Plant ${sampleId} is not registered yet. Would you like to register it now?`)) {
-                              router.push(`/add-plant?zone=${selectedBlock.zone}&block=${selectedBlock.id}&plant_no=${pNum}`);
-                            }
-                          }
-                          setSelectedBlock(null);
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
-                          isRegistered
-                            ? 'bg-pale-green text-primary border-primary/20 hover:bg-pale-green/80'
-                            : 'bg-surface text-text-secondary border-border-light hover:bg-border-light'
-                        }`}
-                      >
-                        #{String(pNum).padStart(3, '0')} {isRegistered ? '✓' : '+'}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[9px] text-text-secondary mt-1.5 leading-normal">
-                  Supervisors must sample these indices. Click to inspect (✓) or register (+).
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="space-y-2 pt-2 border-t border-border-light">
-                <button
-                  onClick={() => {
-                    router.push(`/add-plant?zone=${selectedBlock.zone}&block=${selectedBlock.id}`);
-                    setSelectedBlock(null);
-                  }}
-                  className="w-full bg-[#1B4332] text-white py-3 rounded-full text-xs font-bold hover:bg-primary transition shadow-md flex items-center justify-center gap-1.5"
-                >
-                  <Bug className="h-4 w-4" />
-                  Register Plant in Block {selectedBlock.id}
-                </button>
-                <button
-                  onClick={() => setSelectedBlock(null)}
-                  className="w-full border border-border-light text-text-secondary py-3 rounded-full text-xs font-bold hover:bg-surface transition"
-                >
-                  Close Modal
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
