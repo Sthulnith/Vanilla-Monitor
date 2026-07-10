@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { saveInspectionOffline } from '../../lib/offline-db';
-import { getUserProfile } from '../../lib/profileService';
+import { getUserProfile } from '../../lib/authService';
 
 // ─── types ───────────────────────────────────────────────────
 type Step = 'select' | 'form';
