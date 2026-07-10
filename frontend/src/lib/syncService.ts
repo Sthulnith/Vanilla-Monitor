@@ -461,6 +461,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           block: report.block,
           dead_support_trees: Number(report.dead_support_trees || 0),
           dead_vines: Number(report.dead_vines || 0),
+          notes: report.notes || null,
           reported_at: report.reportedAt || report.reported_at || new Date().toISOString()
         };
         

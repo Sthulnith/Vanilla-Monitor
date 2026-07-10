@@ -15,7 +15,7 @@ interface VanillaMonitorDB {
   };
   mortality_reports: {
     key: string;
-    value: { id: string; zone: string; block: string; dead_support_trees: number; dead_vines: number; reportedAt: string };
+    value: { id: string; zone: string; block: string; dead_support_trees: number; dead_vines: number; notes?: string; reportedAt: string };
   };
   settings: {
     key: string;
