@@ -49,7 +49,7 @@ export default function DigitalTwinPage() {
       submissions.forEach((s) => {
         const key = `${s.zone}-${s.block}`;
         if (statusMap[key]) {
-          const pH = s.soil_pH;
+          const pH = s.soil_pH ?? s.soil_ph;
           const foliage = s.foliage_color;
 
           if (pH < 5.5 || pH > 7.0 || foliage === 'Brown' || foliage === 'Red') {

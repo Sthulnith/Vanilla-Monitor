@@ -326,7 +326,7 @@ export default function DashboardPage() {
                     <div>
                       <h4 className="text-xs font-bold text-text-primary">Plant {sub.plant_id}</h4>
                       <p className="text-[10px] text-text-secondary mt-0.5">
-                        pH: {sub.soil_pH} • {sub.watering_status} • Height: {sub.vine_height_cm} cm
+                        pH: {sub.soil_pH ?? sub.soil_ph ?? 'N/A'} • {sub.watering_status || 'N/A'} • Height: {sub.vine_height_cm !== undefined && sub.vine_height_cm !== null ? `${sub.vine_height_cm} cm` : 'N/A'}
                       </p>
                     </div>
                   </div>

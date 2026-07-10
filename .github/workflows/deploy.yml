@@ -46,7 +46,7 @@ jobs:
 
       # 2. Trigger Render Deploy (Backend)
       - name: Trigger Render Deploy (Backend)
-        if: env.BACKEND_HOOK != ''
+        if: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK != '' }}
         env:
           BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
         run: curl -X POST "$BACKEND_HOOK"

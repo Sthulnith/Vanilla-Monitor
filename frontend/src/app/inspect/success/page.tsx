@@ -87,7 +87,7 @@ export default function InspectionSuccess() {
                 <div>
                   <span className="text-[9px] font-bold text-text-secondary uppercase">pH Level</span>
                   <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {details.soil_pH} ({details.soil_pH >= 6.0 && details.soil_pH <= 6.5 ? 'Optimal' : 'Sub-optimal'})
+                    {details.soil_pH ?? details.soil_ph ?? 'N/A'} ({(details.soil_pH ?? details.soil_ph ?? 0) >= 6.0 && (details.soil_pH ?? details.soil_ph ?? 0) <= 6.5 ? 'Optimal' : 'Sub-optimal'})
                   </span>
                 </div>
                 <div>

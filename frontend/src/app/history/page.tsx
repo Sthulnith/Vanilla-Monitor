@@ -88,7 +88,8 @@ export default function HistoryPage() {
           (sub.plant_id && sub.plant_id.toLowerCase().includes(q)) ||
           (sub.zone && sub.zone.toLowerCase().includes(q)) ||
           (sub.block && sub.block.toLowerCase().includes(q)) ||
-          (sub.field_notes && sub.field_notes.toLowerCase().includes(q))
+          (sub.field_notes && sub.field_notes.toLowerCase().includes(q)) ||
+          (sub.notes && sub.notes.toLowerCase().includes(q))
       );
     }
 
@@ -244,10 +245,10 @@ export default function HistoryPage() {
                 <div>
                   <h4 className="text-xs font-black text-text-primary">Plant {sub.plant_id}</h4>
                   <p className="text-[9px] text-text-secondary mt-0.5">
-                    Zone {sub.zone} • Block {sub.block} • {sub.plant_type}
+                    Zone {sub.zone} • Block {sub.block} • {sub.plant_type || 'Cutting'}
                   </p>
                   <p className="text-[10px] font-medium text-text-primary mt-1 line-clamp-1 max-w-[200px]">
-                    {sub.field_notes || 'No notes added.'}
+                    {sub.field_notes || sub.notes || 'No notes added.'}
                   </p>
                 </div>
               </div>
@@ -312,27 +313,29 @@ export default function HistoryPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Common Name</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.common_name}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.common_name || 'Vanilla'}</span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Variety</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.variety}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.variety || 'Local'}</span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Vine Height</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.vine_height_cm} cm</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">
+                    {selectedSub.vine_height_cm !== undefined && selectedSub.vine_height_cm !== null ? `${selectedSub.vine_height_cm} cm` : 'N/A'}
+                  </span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Soil pH</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.soil_pH}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.soil_pH ?? selectedSub.soil_ph ?? 'N/A'}</span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Moisture Status</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.watering_status}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.watering_status || 'N/A'}</span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Sunlight</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.sunlight_level}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.sunlight_level || 'N/A'}</span>
                 </div>
               </div>
 
@@ -343,7 +346,7 @@ export default function HistoryPage() {
                   Brand: <span className="font-semibold">{selectedSub.fertiliser_used || 'None'}</span>
                 </div>
                 <div className="text-[10px] text-text-secondary font-semibold">
-                  Types: {selectedSub.fertiliser_type || 'N/A'}
+                  Types: {Array.isArray(selectedSub.fertiliser_type) ? selectedSub.fertiliser_type.join(', ') : (selectedSub.fertiliser_type || 'N/A')}
                 </div>
               </div>
 
@@ -351,7 +354,7 @@ export default function HistoryPage() {
               <div className="bg-surface rounded-xl p-3 border border-border-light">
                 <span className="text-[8px] font-bold text-text-secondary uppercase block mb-1">Field Notes</span>
                 <p className="text-xs font-medium text-text-primary leading-relaxed whitespace-pre-line">
-                  {selectedSub.field_notes || 'No additional notes recorded.'}
+                  {selectedSub.field_notes ?? selectedSub.notes ?? 'No additional notes recorded.'}
                 </p>
               </div>
 

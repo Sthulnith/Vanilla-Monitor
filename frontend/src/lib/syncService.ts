@@ -75,6 +75,7 @@ export async function saveInspectionOffline(formData: any, photoBlob: Blob | nul
     : null;
 
   const submission = {
+    ...formData,
     id: submissionId,
     status: 'pending',
     sync_status: 'pending',
@@ -84,8 +85,7 @@ export async function saveInspectionOffline(formData: any, photoBlob: Blob | nul
     supervisor_name: supervisorName,
     supervisor_email: supervisorEmail,
     photo_blob: photoBase64,
-    photo_filename: photoFilename,
-    ...formData
+    photo_filename: photoFilename
   };
 
   await saveDBOffline(submission);
@@ -146,8 +146,9 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
             console.log('Successfully uploaded photo to Supabase Storage:', supabasePhotoUrl);
           }
         } catch (photoErr: any) {
-          console.error('Failed to process and upload photo to Supabase:', photoErr);
-          throw photoErr;
+          console.error('Failed to process and upload photo to Supabase (continuing with text sync):', photoErr);
+          // Set to null or fallback URL so the text submission can still sync successfully
+          supabasePhotoUrl = null;
         }
       }
 

@@ -20,14 +20,14 @@ export function buildSheetRow(submission: any, photoDriveUrl: string | null): an
     submission.watering_status || '', // Column Q: watering_status
     submission.sunlight_level || '', // Column R: sunlight_level
     submission.shade_level || '', // Column S: shade_level
-    submission.soil_pH || '', // Column T: soil_pH
+    submission.soil_pH ?? submission.soil_ph ?? '', // Column T: soil_pH
     submission.soil_pH_recorded_at || '', // Column U: soil_pH_recorded_at
     submission.temperature_c || '', // Column V: temperature_c
     submission.temperature_recorded_at || '', // Column W: temperature_recorded_at
     submission.humidity_pct || '', // Column X: humidity_pct
     submission.humidity_recorded_at || '', // Column Y: humidity_recorded_at
     submission.soil_type || 'Acidic', // Column Z: soil_type
-    (submission.fertiliser_type || []).join(', '), // Column AA: fertiliser_type
+    Array.isArray(submission.fertiliser_type) ? submission.fertiliser_type.join(', ') : (submission.fertiliser_type || ''), // Column AA: fertiliser_type
     submission.last_fertilised || '', // Column AB: last_fertilised
     submission.fertiliser_used || '', // Column AC: fertiliser_used
     submission.vine_height_cm || '', // Column AD: vine_height_cm
