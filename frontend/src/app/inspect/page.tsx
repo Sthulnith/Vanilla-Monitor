@@ -20,6 +20,21 @@ export default function InspectSelectionPage() {
       if (list.length > 0) {
         setSelectedPlantId(list[0].plant_id);
       }
+
+      // Trigger background sync to pull plants from Supabase and refresh dropdown list
+      try {
+        const { pullPlantsFromSupabase } = await import('../../lib/syncService');
+        const { plantsCount } = await pullPlantsFromSupabase();
+        if (plantsCount > 0) {
+          const updatedList = await getPlants();
+          setPlantsList(updatedList);
+          if (updatedList.length > 0) {
+            setSelectedPlantId(updatedList[0].plant_id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed background plant sync in select screen:', err);
+      }
     };
     loadPlants();
   }, []);

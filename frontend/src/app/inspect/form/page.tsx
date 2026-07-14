@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Camera, Sparkles, Droplet, Thermometer, Ruler, AlertCircle, Lock, Unlock } from 'lucide-react';
-import { getPlant, getPreviousHeight, getSetting, saveSetting } from '../../../lib/offline-db';
+import { getPlant, getPreviousHeight, getSetting, saveSetting, savePlantOffline } from '../../../lib/offline-db';
 import { saveInspectionOfflineService, syncPendingSubmissions } from '../../../lib/syncService';
 import { supabase } from '../../../lib/supabaseClient';
 
@@ -52,7 +52,24 @@ export default function InspectFormPage() {
     }
 
     const loadPlantDetails = async () => {
-      const details = await getPlant(plantId);
+      let details = await getPlant(plantId);
+      
+      if (!details && navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from('plants')
+            .select('*')
+            .eq('plant_id', plantId)
+            .maybeSingle();
+          if (!error && data) {
+            details = { ...data, sync_status: 'synced' };
+            await savePlantOffline(details);
+          }
+        } catch (e) {
+          console.error('Failed to fetch individual plant from Supabase:', e);
+        }
+      }
+
       if (details) {
         setStaticDetails(details);
       } else {

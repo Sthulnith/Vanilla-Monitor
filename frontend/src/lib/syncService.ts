@@ -535,6 +535,13 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing carried fertilizer:', err);
   }
 
+  // 7. Pull any new plants registered elsewhere
+  try {
+    await pullPlantsFromSupabase();
+  } catch (err) {
+    console.error('Error pulling plants on sync:', err);
+  }
+
   window.dispatchEvent(new Event('sync-complete'));
   return { synced, failed };
 }
@@ -599,8 +606,79 @@ export async function syncCarriedFertilizer(): Promise<void> {
       }
     }
   } catch (err) {
-    console.error('Failed to sync carried fertilizer:', err);
+    console.error('Error syncing carried fertilizer:', err);
   }
+}
+/**
+ * Fetches all registered plants and their locations from Supabase and saves them
+ * to the local IndexedDB database. This ensures they are available offline.
+ */
+export async function pullPlantsFromSupabase(): Promise<{ plantsCount: number; locationsCount: number }> {
+  if (typeof window === 'undefined') return { plantsCount: 0, locationsCount: 0 };
+  const isMockOffline = localStorage.getItem('mock_offline') === 'true';
+  if (isMockOffline || !navigator.onLine) {
+    return { plantsCount: 0, locationsCount: 0 };
+  }
+
+  let plantsCount = 0;
+  let locationsCount = 0;
+
+  try {
+    // 1. Fetch plants
+    const { data: plantsData, error: plantsError } = await supabase
+      .from('plants')
+      .select('*');
+
+    if (plantsError) {
+      throw new Error(plantsError.message);
+    }
+
+    if (plantsData && plantsData.length > 0) {
+      for (const plant of plantsData) {
+        // Keep pending items in local DB if there are any conflicts,
+        // otherwise save remote plant as 'synced'
+        const existingLocal = await getPlant(plant.plant_id);
+        if (existingLocal?.sync_status === 'pending') {
+          // Keep local pending edits
+          continue;
+        }
+        await saveLocalPlant({
+          ...plant,
+          sync_status: 'synced'
+        });
+        plantsCount++;
+      }
+    }
+
+    // 2. Fetch plant locations
+    const { data: locData, error: locError } = await supabase
+      .from('plant_locations')
+      .select('*');
+
+    if (locError) {
+      throw new Error(locError.message);
+    }
+
+    if (locData && locData.length > 0) {
+      for (const loc of locData) {
+        // Check if there is a pending local location first
+        const { getPlantLocation } = await import('./offline-db');
+        const existingLocalLoc = await getPlantLocation(loc.plant_id);
+        if (existingLocalLoc?.sync_status === 'pending') {
+          continue;
+        }
+        await saveLocalLoc({
+          ...loc,
+          sync_status: 'synced'
+        });
+        locationsCount++;
+      }
+    }
+  } catch (err) {
+    console.error('Error pulling plants/locations from Supabase:', err);
+  }
+
+  return { plantsCount, locationsCount };
 }
 
 // Auto-sync

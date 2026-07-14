@@ -130,6 +130,15 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
 
+    // Pull registered plants from Supabase in the background on mount
+    import('../../lib/syncService').then(({ pullPlantsFromSupabase }) => {
+      pullPlantsFromSupabase().then(({ plantsCount }) => {
+        if (plantsCount > 0) {
+          window.dispatchEvent(new Event('submissions-updated'));
+        }
+      }).catch(err => console.error('Failed background plant sync on dashboard mount:', err));
+    });
+
     // Listen to sync completions or changes
     window.addEventListener('sync-complete', loadData);
     window.addEventListener('submissions-updated', loadData);
