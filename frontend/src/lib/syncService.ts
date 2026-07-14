@@ -12,10 +12,34 @@ import {
   getPlant,
   savePlantOffline as saveLocalPlant,
   savePlantLocationOffline as saveLocalLoc,
-  saveInspectionOffline as saveLocalInsp
+  saveInspectionOffline as saveLocalInsp,
+  getSetting,
+  saveSetting
 } from './offline-db';
 import { appendToSheets, buildSheetRow } from './sheetsService';
 import { supabase } from './supabaseClient';
+import { getGoogleAccessToken } from './authService';
+
+const mapSunlightToLux = (val: string | null) => {
+  switch (val) {
+    case 'bright': return '>20,000 lux';
+    case 'bright_indirect': return '10,000-20,000 lux';
+    case 'medium': return '1,000-10,000 lux';
+    case 'low': return '<1,000 lux';
+    default: return null;
+  }
+};
+
+const mapShadeToPercentage = (val: string | null) => {
+  switch (val) {
+    case 'light': return '0-25%';
+    case 'partial': return '25-50%';
+    case 'moderate': return '50-70%';
+    case 'heavy': return '>70%';
+    default: return null;
+  }
+};
+
 
 /**
  * Converts a Blob to a Base64-encoded string.
@@ -182,7 +206,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     return { synced: 0, failed: 0 };
   }
 
-  const token = localStorage.getItem('google_access_token');
+  const token = await getGoogleAccessToken();
   const sheetId = localStorage.getItem('spreadsheet_id') || process.env.NEXT_PUBLIC_SPREADSHEET_ID || '';
 
   let synced = 0;
@@ -333,7 +357,9 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           supervisor_email: inspection.supervisor_email,
           watering_status: inspection.watering_status,
           sunlight_level: inspection.sunlight_level,
+          sunlight_lux: inspection.sunlight_lux,
           shade_level: inspection.shade_level,
+          shade_percentage: inspection.shade_percentage,
           soil_type: inspection.soil_type,
           soil_ph: inspection.soil_ph,
           soil_ec: inspection.soil_ec,
@@ -347,6 +373,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           foliage_color: inspection.foliage_color,
           notes: inspection.notes,
           photo_url: supabasePhotoUrl || inspection.photo_url,
+          fertilizer_source: inspection.fertilizer_source || 'carried',
           sync_status: 'synced'
         };
 
@@ -403,15 +430,41 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
         }
 
         // Upsert legacy submission as an inspection record in Supabase
+        // Derive the plant_id in the canonical format used by the plants table
+        const derivedPlantId = submission.plant_id ||
+          `${submission.zone}${String(submission.block).padStart(2, '0')}-P${String(submission.plant_number || '001').padStart(3, '0')}`;
+
+        // Verify the plant exists in Supabase before inserting (prevents FK constraint violations)
+        const { data: plantCheck, error: plantCheckError } = await supabase
+          .from('plants')
+          .select('plant_id')
+          .eq('plant_id', derivedPlantId)
+          .maybeSingle();
+
+        if (plantCheckError) {
+          console.warn(`Could not verify plant ${derivedPlantId} in Supabase:`, plantCheckError.message);
+        }
+
+        if (!plantCheck) {
+          // Plant doesn't exist in Supabase yet — skip DB insert but mark as synced
+          // so it doesn't keep retrying. Google Sheets was already appended above.
+          console.warn(`Skipping Supabase insert for legacy submission ${submission.id}: plant "${derivedPlantId}" not found in plants table.`);
+          await markAsSyncedInDB(submission.id, supabasePhotoUrl || undefined);
+          synced++;
+          continue;
+        }
+
         const payload = {
           id: submission.id,
-          plant_id: submission.plant_id || `${submission.zone}${submission.block}-P${String(submission.plant_number || '001').padStart(3, '0')}`,
+          plant_id: derivedPlantId,
           inspection_date: submission.submitted_at || new Date().toISOString(),
           supervisor_name: submission.supervisor_name || null,
           supervisor_email: submission.supervisor_email || null,
           watering_status: submission.watering_status || null,
           sunlight_level: submission.sunlight_level || null,
+          sunlight_lux: submission.sunlight_lux || mapSunlightToLux(submission.sunlight_level),
           shade_level: submission.shade_level || null,
+          shade_percentage: submission.shade_percentage || mapShadeToPercentage(submission.shade_level),
           soil_type: submission.soil_type || null,
           soil_ph: submission.soil_pH !== undefined && submission.soil_pH !== null ? Number(submission.soil_pH) : null,
           temperature: submission.temperature_c !== undefined && submission.temperature_c !== null ? Number(submission.temperature_c) : null,
@@ -423,6 +476,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           foliage_color: submission.foliage_color || null,
           notes: submission.field_notes || submission.notes || null,
           photo_url: supabasePhotoUrl || submission.photo_url || null,
+          fertilizer_source: submission.fertilizer_source || 'edited',
           sync_status: 'synced'
         };
 
@@ -474,8 +528,79 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing mortality reports:', err);
   }
 
+  // 6. Sync Carried Fertilizer Settings
+  try {
+    await syncCarriedFertilizer();
+  } catch (err) {
+    console.error('Error syncing carried fertilizer:', err);
+  }
+
   window.dispatchEvent(new Event('sync-complete'));
   return { synced, failed };
+}
+
+/**
+ * Synchronizes carried fertilizer preferences offline-first.
+ */
+export async function syncCarriedFertilizer(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const isMockOffline = localStorage.getItem('mock_offline') === 'true';
+  if (isMockOffline || !navigator.onLine) {
+    return;
+  }
+
+  try {
+    const localCarried = await getSetting('carried_fertilizer');
+    
+    // Fetch from Supabase
+    const { data: remoteData, error: fetchError } = await supabase
+      .from('carried_fertilizer')
+      .select('*')
+      .eq('id', 'default')
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('Error fetching carried_fertilizer from Supabase:', fetchError.message);
+      return;
+    }
+
+    if (remoteData) {
+      const remoteTime = remoteData.updated_at ? new Date(remoteData.updated_at).getTime() : 0;
+      const localTime = (localCarried && localCarried.updated_at) ? new Date(localCarried.updated_at).getTime() : 0;
+
+      if (!localCarried || remoteTime > localTime) {
+        // Server is newer or local is missing: update local
+        await saveSetting('carried_fertilizer', {
+          fertilizer_types: remoteData.fertilizer_types || [],
+          fertilizer_description: remoteData.fertilizer_description || '',
+          last_fertilized_date: remoteData.last_fertilized_date || '',
+          updated_at: remoteData.updated_at,
+          updated_by: remoteData.updated_by || 'unknown'
+        });
+        return;
+      }
+    }
+
+    // Server is empty or local is newer: push local to server if we have local
+    if (localCarried) {
+      const { error: upsertError } = await supabase
+        .from('carried_fertilizer')
+        .upsert({
+          id: 'default',
+          fertilizer_types: localCarried.fertilizer_types,
+          fertilizer_description: localCarried.fertilizer_description,
+          last_fertilized_date: localCarried.last_fertilized_date,
+          updated_at: localCarried.updated_at || new Date().toISOString(),
+          updated_by: localCarried.updated_by || 'unknown'
+        });
+
+      if (upsertError) {
+        console.error('Error upserting carried_fertilizer to Supabase:', upsertError.message);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to sync carried fertilizer:', err);
+  }
 }
 
 // Auto-sync

@@ -73,6 +73,7 @@ CREATE TABLE inspections (
     fertilizer_type TEXT[],
     fertilizer_used TEXT,
     last_fertilized DATE,
+    fertilizer_source TEXT DEFAULT 'edited',
     
     -- Measurements & Health
     vine_height_cm NUMERIC,
@@ -82,6 +83,17 @@ CREATE TABLE inspections (
     
     sync_status TEXT DEFAULT 'synced',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 5. Carried Fertilizer Table (Independent Plantation Settings)
+-- Holds fertilizer choices and brand description cached offline per plantation.
+CREATE TABLE carried_fertilizer (
+    id TEXT PRIMARY KEY,
+    fertilizer_types TEXT[],
+    fertilizer_description TEXT,
+    last_fertilized_date DATE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+    updated_by TEXT
 );
 
 -- 4. Mortality Reports Table (Block-level Health)
