@@ -359,13 +359,19 @@ function NewInspectionInner() {
           <FormField label="Sunlight Level">
             <select value={form.sunlight_level} onChange={e => setField('sunlight_level', e.target.value)} className={INPUT}>
               <option value="">Select...</option>
-              {['Bright', 'Bright indirect', 'Medium', 'Low'].map(o => <option key={o}>{o}</option>)}
+              <option value="bright">Bright (7-9 bars, &gt;20,000 lux)</option>
+              <option value="bright_indirect">Bright indirect (4-6 bars, 10,000-20,000 lux)</option>
+              <option value="medium">Medium (2-3 bars, 1,000-10,000 lux)</option>
+              <option value="low">Low (0-1 bars, &lt;1,000 lux)</option>
             </select>
           </FormField>
           <FormField label="Shade Level">
             <select value={form.shade_level} onChange={e => setField('shade_level', e.target.value)} className={INPUT}>
               <option value="">Select...</option>
-              {['Shade < 75%', 'Shade > 75%', 'Partial shade < 50%', 'Partial shade > 50%'].map(o => <option key={o}>{o}</option>)}
+              <option value="light">Light (0-25%)</option>
+              <option value="partial">Partial (25-50%)</option>
+              <option value="moderate">Moderate (50-70%)</option>
+              <option value="heavy">Heavy (&gt;70%)</option>
             </select>
           </FormField>
         </FormSection>

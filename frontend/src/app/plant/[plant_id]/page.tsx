@@ -32,6 +32,28 @@ function deriveHealth(insp: any): HealthStatus {
   return 'healthy';
 }
 
+function mapSunlight(val: string | null) {
+  if (!val) return null;
+  const mapping: Record<string, string> = {
+    bright: 'Bright (7-9 bars, >20k lux)',
+    bright_indirect: 'Bright indirect (4-6 bars, 10k-20k lux)',
+    medium: 'Medium (2-3 bars, 1k-10k lux)',
+    low: 'Low (0-1 bars, <1k lux)'
+  };
+  return mapping[val.toLowerCase()] || val;
+}
+
+function mapShade(val: string | null) {
+  if (!val) return null;
+  const mapping: Record<string, string> = {
+    light: 'Light (0-25%)',
+    partial: 'Partial (25-50%)',
+    moderate: 'Moderate (50-70%)',
+    heavy: 'Heavy (>70%)'
+  };
+  return mapping[val.toLowerCase()] || val;
+}
+
 // ─── Main Component ───────────────────────────────────────────
 export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: string }> }) {
   const { plant_id } = use(params);
@@ -249,8 +271,8 @@ export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: 
             badge={fmtDate(latestInsp.inspection_date)}>
             <Row label="Supervisor" value={latestInsp.supervisor_name} />
             <Row label="Watering Status" value={latestInsp.watering_status} />
-            <Row label="Sunlight Level" value={latestInsp.sunlight_level} />
-            <Row label="Shade Level" value={latestInsp.shade_level} />
+            <Row label="Sunlight Level" value={mapSunlight(latestInsp.sunlight_level)} />
+            <Row label="Shade Level" value={mapShade(latestInsp.shade_level)} />
             <Row label="Soil Type" value={latestInsp.soil_type} />
             <Row label="Soil pH" value={latestInsp.soil_ph ?? latestInsp.soil_pH} />
             <Row label="Soil EC" value={latestInsp.soil_ec ? `${latestInsp.soil_ec} mS/cm` : null} />
@@ -328,7 +350,7 @@ export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: 
                               )}
                             </div>
                             <button
-                              onClick={() => router.push(`/inspect/view/${insp.id}`)}
+                              onClick={() => router.push(`/history?plant_id=${plant_id}&view=${insp.id}`)}
                               className="text-[9px] font-bold text-primary hover:underline"
                             >
                               View

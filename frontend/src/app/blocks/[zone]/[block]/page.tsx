@@ -2,10 +2,10 @@
 
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Search, X, QrCode, Plus, ChevronRight, RefreshCw, Leaf } from 'lucide-react';
+import { ArrowLeft, X, QrCode, Plus, ChevronRight, RefreshCw, Leaf } from 'lucide-react';
 import { supabase } from '../../../../lib/supabaseClient';
 import { getPlants } from '../../../../lib/offline-db';
-import { PLANTATION } from '../../../../lib/plantData';
+import { PLANTATION, getTrackedPlants, formatPlantId } from '../../../../lib/plantData';
 
 type HealthStatus = 'healthy' | 'moderate' | 'high-risk' | 'dead';
 
@@ -34,41 +34,40 @@ function deriveHealth(insp: any): HealthStatus {
   return 'healthy';
 }
 
-const HEALTH_CONFIG: Record<HealthStatus, { label: string; badge: string; dot: string; card: string }> = {
-  healthy:   { label: 'Healthy',   badge: 'bg-green-100 text-green-800',    dot: 'bg-green-500',  card: '' },
-  moderate:  { label: 'Moderate',  badge: 'bg-amber-100 text-amber-800',    dot: 'bg-amber-400',  card: '' },
-  'high-risk': { label: 'High Risk', badge: 'bg-orange-100 text-orange-800', dot: 'bg-orange-500', card: '' },
-  dead:      { label: 'Dead',      badge: 'bg-red-100 text-red-800',        dot: 'bg-red-600',    card: '' },
-};
-
-const FILTER_OPTIONS: Array<{ key: HealthStatus | 'all'; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'healthy', label: 'Healthy' },
-  { key: 'moderate', label: 'Moderate' },
-  { key: 'high-risk', label: 'High Risk' },
-  { key: 'dead', label: 'Dead' },
-];
+function formatPlantCardDate(plant: any): string {
+  const dateVal = plant.planted_date || plant.created_at || plant.lastInspectionDate;
+  if (!dateVal) return 'No Date';
+  const dateObj = new Date(dateVal);
+  if (isNaN(dateObj.getTime())) {
+    // If it's something like "2026-07-11", try parsing manually
+    return String(dateVal);
+  }
+  return dateObj.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 export default function BlockRegistryPage({ params }: { params: Promise<{ zone: string; block: string }> }) {
   const { zone, block } = use(params);
   const router = useRouter();
 
   const [plants, setPlants] = useState<PlantWithHealth[]>([]);
-  const [filtered, setFiltered] = useState<PlantWithHealth[]>([]);
-  const [search, setSearch] = useState('');
-  const [healthFilter, setHealthFilter] = useState<HealthStatus | 'all'>('all');
   const [loading, setLoading] = useState(true);
 
   const blockInfo = PLANTATION[zone]?.blocks.find(b => b.id === block);
   const totalCapacity = blockInfo?.plants || 0;
+  const trackedPlantIds = getTrackedPlants(zone, block);
 
   const loadPlants = async () => {
     setLoading(true);
     try {
-      // Fetch plants for this block
+      // 1. Fetch local plants for this block
       const local = await getPlants();
       const localBlock = local.filter(p => p.zone === zone && p.block === block);
 
+      // 2. Fetch remote plants from Supabase
       const { data: remote } = await supabase
         .from('plants')
         .select('*')
@@ -76,203 +75,230 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
         .eq('block', block)
         .order('plant_no', { ascending: true });
 
+      // Merge plants (determine sync_status)
       const merged = new Map<string, any>();
-      (remote || []).forEach(p => merged.set(p.plant_id, p));
-      localBlock.forEach(p => merged.set(p.plant_id, { ...merged.get(p.plant_id), ...p }));
+      (remote || []).forEach(p => {
+        merged.set(p.plant_id, { ...p, sync_status: 'synced' });
+      });
+      localBlock.forEach(p => {
+        const existing = merged.get(p.plant_id);
+        if (existing) {
+          merged.set(p.plant_id, { ...existing, ...p, sync_status: 'synced' });
+        } else {
+          merged.set(p.plant_id, { ...p, sync_status: p.sync_status || 'pending' });
+        }
+      });
 
       const plantList = Array.from(merged.values());
 
-      // Fetch latest inspection for each plant
-      const { data: inspections } = await supabase
-        .from('inspections')
-        .select('plant_id, inspection_date, soil_ph, foliage_color, vine_height_cm')
-        .in('plant_id', plantList.map(p => p.plant_id))
-        .order('inspection_date', { ascending: false });
+      // 3. Fetch latest inspections for this block's plants
+      let enrichmentMap: Record<string, PlantWithHealth> = {};
+      if (plantList.length > 0) {
+        const { data: inspections } = await supabase
+          .from('inspections')
+          .select('plant_id, inspection_date, soil_ph, foliage_color, vine_height_cm')
+          .in('plant_id', plantList.map(p => p.plant_id))
+          .order('inspection_date', { ascending: false });
 
-      // Group inspections by plant_id (latest first)
-      const latestInsp: Record<string, any> = {};
-      (inspections || []).forEach(i => {
-        if (!latestInsp[i.plant_id]) latestInsp[i.plant_id] = i;
-      });
+        const latestInsp: Record<string, any> = {};
+        (inspections || []).forEach(i => {
+          if (!latestInsp[i.plant_id]) {
+            latestInsp[i.plant_id] = i;
+          }
+        });
 
-      const enriched: PlantWithHealth[] = plantList.map(p => ({
-        ...p,
-        health: deriveHealth(latestInsp[p.plant_id]),
-        lastInspectionDate: latestInsp[p.plant_id]?.inspection_date || null,
-        lastVineHeight: latestInsp[p.plant_id]?.vine_height_cm || null,
-      }));
+        plantList.forEach(p => {
+          enrichmentMap[p.plant_id] = {
+            ...p,
+            health: deriveHealth(latestInsp[p.plant_id]),
+            lastInspectionDate: latestInsp[p.plant_id]?.inspection_date || null,
+            lastVineHeight: latestInsp[p.plant_id]?.vine_height_cm || null,
+          };
+        });
+      }
 
-      setPlants(enriched);
+      setPlants(Object.values(enrichmentMap));
     } catch (err) {
-      console.error(err);
+      console.error('Error loading plants:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { loadPlants(); }, [zone, block]);
-
   useEffect(() => {
-    let list = plants;
-    if (healthFilter !== 'all') list = list.filter(p => p.health === healthFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(p =>
-        p.plant_id?.toLowerCase().includes(q) ||
-        p.variety?.toLowerCase().includes(q) ||
-        p.common_name?.toLowerCase().includes(q)
-      );
-    }
-    setFiltered(list);
-  }, [plants, search, healthFilter]);
+    loadPlants();
+  }, [zone, block]);
 
   const counts = {
-    healthy: plants.filter(p => p.health === 'healthy').length,
-    moderate: plants.filter(p => p.health === 'moderate').length,
-    'high-risk': plants.filter(p => p.health === 'high-risk').length,
     dead: plants.filter(p => p.health === 'dead').length,
   };
 
   return (
     <div className="flex flex-col bg-surface min-h-screen pb-32">
-      {/* Header */}
-      <div className="bg-primary text-white px-5 pt-5 pb-6 rounded-b-3xl shadow-md">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button onClick={() => router.back()} className="h-8 w-8 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20">
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-            <div>
-              <span className="text-[9px] uppercase font-bold text-green-light tracking-widest">Zone {zone}</span>
-              <h1 className="text-xl font-extrabold">Block {block}</h1>
-            </div>
-          </div>
-          <button onClick={loadPlants} disabled={loading} className="h-8 w-8 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {[
-            { label: 'Total', value: totalCapacity, color: 'text-white' },
-            { label: 'Healthy', value: counts.healthy, color: 'text-green-300' },
-            { label: 'At Risk', value: counts.moderate + counts['high-risk'], color: 'text-amber-300' },
-            { label: 'Dead', value: counts.dead, color: 'text-red-300' },
-          ].map(s => (
-            <div key={s.label} className="bg-white/10 rounded-2xl p-2.5 text-center">
-              <span className="text-[8px] uppercase font-bold text-green-light/70 block">{s.label}</span>
-              <span className={`text-base font-black block mt-0.5 ${s.color}`}>{s.value}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Search */}
-        <div className="flex items-center bg-white/10 border border-white/20 rounded-2xl px-4 py-2.5 gap-2">
-          <Search className="h-4 w-4 text-white/60 flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search by Plant ID or variety..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="bg-transparent text-xs text-white placeholder:text-white/50 outline-none flex-1 font-semibold"
-          />
-          {search && <button onClick={() => setSearch('')}><X className="h-4 w-4 text-white/60" /></button>}
-        </div>
-      </div>
-
-      {/* Filter chips */}
-      <div className="px-5 pt-4 pb-1 flex gap-2 overflow-x-auto scrollbar-none">
-        {FILTER_OPTIONS.map(f => (
+      {/* Header matching 1st Image */}
+      <div className="bg-primary text-white px-5 py-4 shadow-sm flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <button
-            key={f.key}
-            onClick={() => setHealthFilter(f.key as any)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition-all ${
-              healthFilter === f.key
-                ? 'bg-primary text-white border-primary shadow-sm'
-                : 'bg-white text-text-secondary border-border-light hover:border-primary/30'
-            }`}
+            onClick={() => router.back()}
+            className="text-white hover:opacity-85 transition-opacity"
           >
-            {f.label}
-            {f.key !== 'all' && (
-              <span className="ml-1 opacity-70">({counts[f.key as HealthStatus] ?? plants.length})</span>
-            )}
+            <ArrowLeft className="h-6 w-6" />
           </button>
-        ))}
+          <div>
+            <span className="text-[10px] uppercase font-bold text-green-light block tracking-widest leading-none">
+              Zone {zone}
+            </span>
+            <h1 className="text-base font-extrabold mt-0.5 leading-none">
+              Block {block} – Plants
+            </h1>
+          </div>
+        </div>
+        <button
+          onClick={() => router.push('/digital-twin')}
+          className="text-white hover:opacity-85 transition-opacity"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
-      {/* Plant list */}
-      <div className="px-5 pt-3 space-y-3">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 text-text-secondary">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3" />
-            <p className="text-xs font-semibold">Loading plants...</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white border border-dashed border-border-light rounded-3xl p-10 text-center text-text-secondary">
-            <Leaf className="h-10 w-10 mx-auto mb-3 opacity-25 text-primary" />
-            <p className="text-xs font-semibold">No plants found</p>
-            <p className="text-[10px] opacity-70 mt-1">
-              {plants.length === 0 ? 'No plants registered in this block yet.' : 'Try changing your search or filter.'}
-            </p>
-          </div>
-        ) : (
-          filtered.map(plant => {
-            const h = HEALTH_CONFIG[plant.health];
+      {/* Main Content Area */}
+      {/* Two Stats Cards */}
+      <div className="grid grid-cols-2 gap-4 px-5 pt-5">
+        <div className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block">
+            Total Plants
+          </span>
+          <span className="text-2xl font-black text-text-primary block mt-0.5">
+            {totalCapacity}
+          </span>
+        </div>
+        <div className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block">
+            Dead Vines
+          </span>
+          <span className="text-2xl font-black text-text-primary block mt-0.5">
+            {counts.dead}
+          </span>
+        </div>
+      </div>
+
+      {/* Registered Plants Header & Alert */}
+      <div className="px-5 pt-6 pb-2">
+        <h2 className="text-[11px] font-extrabold uppercase tracking-widest text-text-secondary">
+          Registered Plants ({plants.length})
+        </h2>
+      </div>
+
+      {plants.length === 0 && (
+        <div className="mx-5 mb-2 bg-[#FFF9F2] border border-[#F5E6D3] rounded-xl p-4 text-[#A05E2B] text-xs font-semibold shadow-sm">
+          No plants registered in this block yet.
+        </div>
+      )}
+
+      {/* Sampled Inspection Indices */}
+      <div className="px-5 pt-3 pb-3">
+        <h3 className="text-[10px] uppercase font-bold text-text-secondary tracking-widest mb-2.5">
+          Sampled Inspection Indices
+        </h3>
+        <div className="flex gap-2 mb-3 overflow-x-auto scrollbar-none">
+          {trackedPlantIds.map(idx => {
+            const formattedId = formatPlantId(zone, block, idx);
+            const registered = plants.find(p => p.plant_id === formattedId);
             return (
               <button
-                key={plant.plant_id}
-                onClick={() => router.push(`/plant/${plant.plant_id}`)}
-                className="w-full text-left bg-white rounded-2xl border border-border-light p-4 shadow-sm flex items-center gap-4 hover:shadow-md hover:border-primary/25 active:scale-[0.99] transition-all duration-200"
+                key={idx}
+                onClick={() => {
+                  if (registered) {
+                    router.push(`/plant/${formattedId}`);
+                  } else {
+                    router.push(`/add-plant?zone=${zone}&block=${block}&plant_no=${idx}`);
+                  }
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border shadow-sm transition-all duration-200 active:scale-95 ${
+                  registered
+                    ? 'bg-green-50 text-green-700 border-green-200 hover:border-green-300'
+                    : 'bg-white text-text-secondary border-border-light hover:border-primary/45'
+                }`}
               >
-                {/* Health dot */}
-                <div className="flex-shrink-0 flex flex-col items-center gap-1.5">
-                  <div className={`h-3 w-3 rounded-full ${h.dot}`} />
-                  <QrCode className="h-4 w-4 text-text-secondary opacity-40" />
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <h4 className="text-sm font-black text-text-primary">{plant.plant_id}</h4>
-                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${h.badge}`}>
-                      {h.label}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-text-secondary">
-                    {plant.common_name || 'Vanilla'} • {plant.variety || 'Local'} • {plant.plant_type || 'Cutting'}
-                  </p>
-                  <div className="flex gap-3 mt-1">
-                    <span className="text-[10px] text-text-secondary">
-                      Last inspection:{' '}
-                      <span className="font-semibold text-text-primary">
-                        {plant.lastInspectionDate
-                          ? new Date(plant.lastInspectionDate).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
-                          : 'None'}
-                      </span>
-                    </span>
-                    {plant.lastVineHeight && (
-                      <span className="text-[10px] text-text-secondary">
-                        Height: <span className="font-semibold text-text-primary">{plant.lastVineHeight} cm</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <ChevronRight className="h-4 w-4 text-text-secondary opacity-50 flex-shrink-0" />
+                #{String(idx).padStart(3, '0')}
               </button>
             );
-          })
+          })}
+        </div>
+        <p className="text-[10px] text-text-secondary font-medium">
+          Tap ✓ to view plant details or + to register.
+        </p>
+      </div>
+
+      {/* Plants Card List */}
+      <div className="px-5 pt-2 space-y-3">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent mb-2.5" />
+            <p className="text-xs font-semibold">Loading block registry...</p>
+          </div>
+        ) : (
+          plants.map(plant => (
+            <button
+              key={plant.plant_id}
+              onClick={() => router.push(`/plant/${plant.plant_id}`)}
+              className="w-full text-left bg-white rounded-2xl border border-border-light p-4 shadow-sm flex items-center justify-between hover:shadow-md hover:border-primary/20 active:scale-[0.99] transition-all duration-200"
+            >
+              <div className="flex items-center gap-4">
+                {/* Dynamic Zone Badge */}
+                <div
+                  style={{
+                    backgroundColor: PLANTATION[zone]?.colorPale || '#FEF2F2',
+                    color: PLANTATION[zone]?.color || '#DC2626',
+                  }}
+                  className="w-12 h-12 rounded-xl flex flex-col items-center justify-center font-bold"
+                >
+                  <span className="text-[8px] uppercase tracking-wider opacity-85">Zone</span>
+                  <span className="text-lg font-black leading-none mt-0.5">{zone}</span>
+                </div>
+
+                {/* Center Details */}
+                <div>
+                  <h4 className="text-sm font-black text-text-primary leading-tight">
+                    {plant.plant_id}
+                  </h4>
+                  <p className="text-[10px] text-text-secondary mt-0.5">
+                    {plant.common_name || 'Vanilla'} • {plant.variety || 'Local'} • Block {block}
+                  </p>
+                  <p className="text-[10px] text-text-secondary mt-0.5">
+                    {plant.plant_type || 'Cutting'} • {formatPlantCardDate(plant)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Side: QR and Status Badge */}
+              <div className="flex flex-col items-end justify-between h-12">
+                <QrCode className="h-5 w-5 text-text-secondary opacity-40" />
+                <span
+                  className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${
+                    plant.sync_status === 'pending'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-green-100 text-green-800'
+                  }`}
+                >
+                  {plant.sync_status === 'pending' ? 'PENDING' : 'SYNCED'}
+                </span>
+              </div>
+            </button>
+          ))
         )}
       </div>
 
-      {/* FAB — Add New Plant */}
-      <button
-        onClick={() => router.push(`/add-plant?zone=${zone}&block=${block}`)}
-        className="fixed bottom-20 right-5 z-40 bg-primary text-white h-14 w-14 rounded-full shadow-xl flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-all"
-      >
-        <Plus className="h-6 w-6" />
-      </button>
+      {/* Sticky Bottom Glassmorphic Button */}
+      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/70 backdrop-blur-md border-t border-border-light/45 px-5 py-4 z-40">
+        <button
+          onClick={() => router.push(`/add-plant?zone=${zone}&block=${block}`)}
+          className="w-full bg-primary text-white py-3.5 rounded-full shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-primary/95 active:scale-[0.98] transition-all"
+        >
+          <Plus className="h-5 w-5" />
+          <span>Add New Plant</span>
+        </button>
+      </div>
     </div>
   );
 }

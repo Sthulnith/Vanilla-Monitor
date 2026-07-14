@@ -4,43 +4,207 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Map, ChevronRight } from 'lucide-react';
 import { PLANTATION } from '../../lib/plantData';
-import { getSubmissions, getMortalityReports } from '../../lib/offline-db';
+import { getSubmissions, getPlants, getInspections } from '../../lib/offline-db';
+import { supabase } from '../../lib/supabaseClient';
 
 export default function DigitalTwinPage() {
   const router = useRouter();
   const [activeZone, setActiveZone] = useState<string>('All');
+  const [activeHealth, setActiveHealth] = useState<string>('All');
   const [blockStatus, setBlockStatus] = useState<
     Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }>
   >({});
 
+  const getBlockCategory = (zone: string, blockId: string): 'Healthy' | 'Moderate' | 'High Risk' | 'Dead' => {
+    const bStatus = blockStatus[`${zone}-${blockId}`];
+    if (!bStatus) return 'Healthy';
+    if (bStatus.deadCount > 0) return 'Dead';
+    if (bStatus.status === 'danger') return 'High Risk';
+    if (bStatus.status === 'warning') return 'Moderate';
+    return 'Healthy';
+  };
+
+  const getHealthFilterCount = (statusVal: string) => {
+    let count = 0;
+    Object.entries(PLANTATION).forEach(([z, zd]) => {
+      if (activeZone === 'All' || activeZone === z) {
+        zd.blocks.forEach(b => {
+          const category = getBlockCategory(z, b.id);
+          if (statusVal === category) {
+            count++;
+          }
+        });
+      }
+    });
+    return count;
+  };
+
+  const healthFilters = [
+    { label: 'All', value: 'All' },
+    { label: 'Healthy', value: 'Healthy' },
+    { label: 'Moderate', value: 'Moderate' },
+    { label: 'High Risk', value: 'High Risk' },
+    { label: 'Dead', value: 'Dead' },
+  ];
+
   useEffect(() => {
     const calcHealth = async () => {
-      const submissions = await getSubmissions();
-      const mortality = await getMortalityReports();
-      const map: Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }> = {};
+      // Helper to parse dates robustly
+      const parseDateMs = (dateVal: any): number => {
+        if (!dateVal) return 0;
+        if (typeof dateVal === 'number') return dateVal;
+        if (dateVal instanceof Date) return dateVal.getTime();
+        
+        let str = String(dateVal).trim();
+        let t = Date.parse(str);
+        if (!isNaN(t)) return t;
+        
+        // Handle database date space replacing
+        str = str.replace(' ', 'T');
+        t = Date.parse(str);
+        if (!isNaN(t)) return t;
+        
+        return 0;
+      };
 
+      // 1. Fetch plants (to map plant_id -> zone, block)
+      let plantList: any[] = [];
+      try {
+        const local = await getPlants();
+        const { data: remote } = await supabase.from('plants').select('plant_id, zone, block');
+        
+        const merged: Record<string, any> = {};
+        (remote || []).forEach(p => {
+          if (p.plant_id) merged[p.plant_id] = p;
+        });
+        local.forEach(p => {
+          if (p.plant_id) merged[p.plant_id] = { ...merged[p.plant_id], ...p };
+        });
+        plantList = Object.values(merged);
+      } catch (err) {
+        console.error('Error fetching plants for health calc:', err);
+      }
+
+      // Build a map of plant_id -> { zone, block } (ONLY for registered plants)
+      const plantMap: Record<string, { zone: string; block: string }> = {};
+      plantList.forEach(p => {
+        if (p.plant_id && p.zone && p.block) {
+          plantMap[p.plant_id] = { zone: p.zone, block: p.block };
+        }
+      });
+
+      // 2. Fetch inspections
+      let inspectionList: any[] = [];
+      try {
+        const localInsp = await getInspections();
+        const { data: remoteInsp } = await supabase
+          .from('inspections')
+          .select('id, plant_id, inspection_date, soil_ph, foliage_color, created_at');
+
+        const mergedInsp: Record<string, any> = {};
+        (remoteInsp || []).forEach(i => {
+          if (i.id) mergedInsp[i.id] = i;
+        });
+        localInsp.forEach(i => {
+          if (i.id) mergedInsp[i.id] = { ...mergedInsp[i.id], ...i };
+        });
+        
+        inspectionList = Object.values(mergedInsp);
+      } catch (err) {
+        console.error('Error fetching inspections for health calc:', err);
+      }
+
+      // Group inspections by plant_id and keep only the latest one for each registered plant
+      const latestInspectionsByPlant: Record<string, any> = {};
+      inspectionList.forEach(i => {
+        const pid = i.plant_id;
+        if (!pid || !plantMap[pid]) return; // Only process inspections for registered plants!
+        
+        const currentLatest = latestInspectionsByPlant[pid];
+        const dateA = parseDateMs(i.inspection_date || i.created_at);
+        const dateB = currentLatest ? parseDateMs(currentLatest.inspection_date || currentLatest.created_at) : 0;
+        if (!currentLatest || dateA > dateB) {
+          latestInspectionsByPlant[pid] = i;
+        }
+      });
+
+      // Also support legacy submissions if they exist in IndexedDB and are for registered plants
+      try {
+        const legacySubmissions = await getSubmissions();
+        legacySubmissions.forEach(s => {
+          const pid = s.plant_id;
+          if (!pid || !plantMap[pid]) return; // Only process legacy submissions for registered plants!
+          
+          const currentLatest = latestInspectionsByPlant[pid];
+          const dateA = parseDateMs(s.submitted_at || s.created_at);
+          const dateB = currentLatest ? parseDateMs(currentLatest.inspection_date || currentLatest.created_at || currentLatest.submitted_at) : 0;
+          if (!currentLatest || dateA > dateB) {
+            latestInspectionsByPlant[pid] = {
+              plant_id: pid,
+              inspection_date: s.submitted_at || s.created_at,
+              soil_ph: s.soil_pH ?? s.soil_ph,
+              foliage_color: s.foliage_color
+            };
+          }
+        });
+      } catch (err) {
+        console.error('Error fetching legacy submissions for health calc:', err);
+      }
+
+      // Initialize map with default 'healthy' status
+      const map: Record<string, { status: 'healthy' | 'warning' | 'danger'; deadCount: number }> = {};
       Object.entries(PLANTATION).forEach(([z, zd]) =>
         zd.blocks.forEach(b => { map[`${z}-${b.id}`] = { status: 'healthy', deadCount: 0 }; })
       );
 
-      mortality.forEach(r => {
-        const key = `${r.zone}-${r.block}`;
-        if (map[key]) {
-          map[key].deadCount += r.dead_vines || 0;
-          if (r.dead_vines > 2) map[key].status = 'danger';
-          else if (r.dead_vines > 0 && map[key].status !== 'danger') map[key].status = 'warning';
+      // Group registered plants by block
+      const blockPlants: Record<string, string[]> = {};
+      Object.entries(plantMap).forEach(([pid, loc]) => {
+        const blockKey = `${loc.zone}-${loc.block}`;
+        if (!blockPlants[blockKey]) {
+          blockPlants[blockKey] = [];
         }
+        blockPlants[blockKey].push(pid);
       });
 
-      submissions.forEach(s => {
-        const key = `${s.zone}-${s.block}`;
-        if (map[key]) {
-          const pH = s.soil_pH ?? s.soil_ph;
-          const f = s.foliage_color;
-          if (pH < 5.5 || pH > 7.0 || f === 'Brown' || f === 'Red') map[key].status = 'danger';
-          else if (((pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)) || f === 'Yellow' || f === 'Mixed') {
-            if (map[key].status !== 'danger') map[key].status = 'warning';
+      // For each block, calculate overall status based on the derived health of all its registered plants
+      Object.entries(blockPlants).forEach(([blockKey, pids]) => {
+        if (!map[blockKey]) return;
+        
+        let hasDanger = false;
+        let hasWarning = false;
+        let deadCount = 0;
+
+        pids.forEach(pid => {
+          const insp = latestInspectionsByPlant[pid];
+          if (!insp) return; // No inspection defaults to healthy, doesn't trigger warning/danger
+          
+          const pH = insp.soil_ph ?? insp.soil_pH;
+          const f = insp.foliage_color;
+          
+          // Match the exact deriveHealth logic of block details page
+          let plantHealth: 'healthy' | 'moderate' | 'high-risk' | 'dead' = 'healthy';
+          if (f === 'Red') {
+            plantHealth = 'dead';
+            deadCount += 1;
+          } else if (f === 'Brown' || pH < 5.5 || pH > 7.0) {
+            plantHealth = 'high-risk';
+          } else if (f === 'Yellow' || f === 'Mixed' || (pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)) {
+            plantHealth = 'moderate';
           }
+
+          if (plantHealth === 'high-risk' || plantHealth === 'dead') {
+            hasDanger = true;
+          } else if (plantHealth === 'moderate') {
+            hasWarning = true;
+          }
+        });
+
+        map[blockKey].deadCount = deadCount;
+        if (hasDanger) {
+          map[blockKey].status = 'danger';
+        } else if (hasWarning) {
+          map[blockKey].status = 'warning';
         }
       });
 
@@ -67,8 +231,14 @@ export default function DigitalTwinPage() {
 
   const blocks: Array<{ zone: string; id: string; plants: number }> = [];
   Object.entries(PLANTATION).forEach(([z, zd]) => {
-    if (activeZone === 'All' || activeZone === z)
-      zd.blocks.forEach(b => blocks.push({ zone: z, id: b.id, plants: b.plants }));
+    if (activeZone === 'All' || activeZone === z) {
+      zd.blocks.forEach(b => {
+        const category = getBlockCategory(z, b.id);
+        if (activeHealth === 'All' || activeHealth === category) {
+          blocks.push({ zone: z, id: b.id, plants: b.plants });
+        }
+      });
+    }
   });
 
   return (
@@ -87,7 +257,10 @@ export default function DigitalTwinPage() {
         {['All', 'A', 'B', 'C', 'D'].map(z => (
           <button
             key={z}
-            onClick={() => setActiveZone(z)}
+            onClick={() => {
+              setActiveZone(z);
+              setActiveHealth('All');
+            }}
             className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
               activeZone === z ? 'bg-primary text-white shadow-sm' : 'bg-pale-green text-primary hover:bg-pale-green/80'
             }`}
@@ -95,6 +268,27 @@ export default function DigitalTwinPage() {
             {z === 'All' ? 'Show All' : `Zone ${z}`}
           </button>
         ))}
+      </div>
+
+      {/* Health status filter */}
+      <div className="px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-none bg-white border-b border-border-light">
+        {healthFilters.map(filter => {
+          const count = getHealthFilterCount(filter.value);
+          const isActive = activeHealth === filter.value;
+          return (
+            <button
+              key={filter.value}
+              onClick={() => setActiveHealth(filter.value)}
+              className={`px-3 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap border transition-all ${
+                isActive
+                  ? 'bg-primary text-white border-primary shadow-sm font-bold'
+                  : 'bg-white text-text-secondary border-border-light hover:bg-surface-container'
+              }`}
+            >
+              {filter.label}{filter.value !== 'All' && ` (${count})`}
+            </button>
+          );
+        })}
       </div>
 
       {/* Block grid */}
