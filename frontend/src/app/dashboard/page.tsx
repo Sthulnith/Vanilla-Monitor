@@ -14,9 +14,10 @@ import {
   Sprout,
   ScanLine,
   FileText,
-  Skull
+  Skull,
+  LogOut
 } from 'lucide-react';
-import { getUserProfile, logoutGoogle } from '../../lib/authService';
+import { useAuth } from '../../context/AuthContext';
 import {
   getPendingCount,
   getSubmissions,
@@ -28,7 +29,9 @@ import { supabase } from '../../lib/supabaseClient';
 import { PLANTATION } from '../../lib/plantData';
 
 export default function DashboardPage() {
-  const [profile, setProfile] = useState<any>(null);
+  const { supervisor, signOut } = useAuth();
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const profileName = supervisor?.full_name || supervisor?.email || 'Supervisor';
   const [stats, setStats] = useState({
     totalPlants: 2187,
     totalBlocks: 19,
@@ -77,9 +80,6 @@ export default function DashboardPage() {
   const [photoNotes, setPhotoNotes] = useState('');
 
   const loadData = async () => {
-    const p = getUserProfile();
-    setProfile(p);
-
     const mortality = await getMortalityStats();
     const count = await getPendingCount();
     setPendingCount(count);
@@ -177,8 +177,8 @@ export default function DashboardPage() {
       plant_id: plantId,
       // Minimal defaults for required columns
       watering_status: 'Keep moist',
-      sunlight_level: 'Bright indirect',
-      shade_level: 'Shade <75%',
+      sunlight_level: 'bright_indirect',
+      shade_level: 'moderate',
       soil_pH: 6.2,
       vine_height_cm: 100,
       foliage_color: 'Green',
@@ -228,7 +228,7 @@ export default function DashboardPage() {
               Sapori dal Mondo
             </span>
             <h1 className="text-xl font-extrabold mt-0.5">
-              Good morning, {profile?.name?.split(' ')[0] || 'Supervisor'}
+              Good morning, {profileName.split(' ')[0]}
             </h1>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-green-pale/75 font-semibold">
@@ -246,14 +246,10 @@ export default function DashboardPage() {
             </div>
           </div>
           <button 
-            onClick={() => {
-              if (confirm('Are you sure you want to sign out?')) {
-                logoutGoogle();
-              }
-            }}
+            onClick={() => setShowSignOutConfirm(true)}
             className="h-10 w-10 bg-white/10 rounded-full flex items-center justify-center font-bold text-sm tracking-wide border border-white/20 hover:bg-white/20"
           >
-            {getInitials(profile?.name || '')}
+            {getInitials(profileName)}
           </button>
         </div>
 
@@ -609,6 +605,37 @@ export default function DashboardPage() {
                 Log Photo Submission
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showSignOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-xs w-full border border-border-light shadow-2xl space-y-4 text-center">
+            <div className="mx-auto w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-600">
+              <LogOut className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-text-primary">Sign Out</h3>
+              <p className="text-xs text-text-secondary mt-1">Are you sure you want to sign out of Vanilla Monitor?</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowSignOutConfirm(false)}
+                className="flex-grow py-2 text-xs font-bold text-text-secondary bg-surface border border-border-light rounded-xl hover:bg-surface-container transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowSignOutConfirm(false);
+                  await signOut();
+                }}
+                className="flex-grow py-2 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       )}

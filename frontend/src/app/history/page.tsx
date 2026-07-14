@@ -1,24 +1,100 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight } from 'lucide-react';
 import { getPendingSubmissions, getPendingInspections } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
 import { supabase } from '../../lib/supabaseClient';
 
-export default function HistoryPage() {
+function HistoryContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const plantIdParam = searchParams.get('plant_id');
+  const viewParam = searchParams.get('view');
+
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [filteredSubmissions, setFilteredSubmissions] = useState<any[]>([]);
-  
+
+  // Selected submission modal
+  const [selectedSub, setSelectedSub] = useState<any>(null);
+  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
+
   // Search and filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'pending'>('all');
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
-  // Selected submission modal
-  const [selectedSub, setSelectedSub] = useState<any>(null);
-  const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
+  // Trigger modal when viewParam and submissions are loaded
+  useEffect(() => {
+    if (viewParam && submissions.length > 0) {
+      const targetSub = submissions.find(s => String(s.id) === String(viewParam));
+      if (targetSub) {
+        // Open details modal
+        setSelectedSub(targetSub);
+        if (targetSub.photo_blob) {
+          try {
+            const blob = base64ToBlob(targetSub.photo_blob);
+            const url = URL.createObjectURL(blob);
+            setSelectedPhotoUrl(url);
+          } catch (err) {
+            console.error(err);
+            setSelectedPhotoUrl(null);
+          }
+        } else {
+          setSelectedPhotoUrl(targetSub.photo_url || null);
+        }
+      }
+    }
+  }, [viewParam, submissions]);
+
+  // Helper to parse dates robustly
+  const parseDateMs = (dateVal: any): number => {
+    if (!dateVal) return 0;
+    if (typeof dateVal === 'number') return dateVal;
+    if (dateVal instanceof Date) return dateVal.getTime();
+    
+    let str = String(dateVal).trim();
+    let t = Date.parse(str);
+    if (!isNaN(t)) return t;
+    
+    str = str.replace(' ', 'T');
+    t = Date.parse(str);
+    if (!isNaN(t)) return t;
+    
+    return 0;
+  };
+
+  const deriveHealth = (insp: any): 'healthy' | 'moderate' | 'high-risk' | 'dead' => {
+    if (!insp) return 'healthy';
+    const pH = insp.soil_pH ?? insp.soil_ph;
+    const f = insp.foliage_color;
+    if (f === 'Red') return 'dead';
+    if (f === 'Brown' || (pH !== undefined && pH !== null && (pH < 5.5 || pH > 7.0))) return 'high-risk';
+    if (f === 'Yellow' || f === 'Mixed' || (pH !== undefined && pH !== null && ((pH >= 5.5 && pH < 6.0) || (pH > 6.5 && pH <= 7.0)))) return 'moderate';
+    return 'healthy';
+  };
+
+  const getHealthDotColor = (health: 'healthy' | 'moderate' | 'high-risk' | 'dead') => {
+    switch (health) {
+      case 'healthy': return 'bg-green-500';
+      case 'moderate': return 'bg-amber-400';
+      case 'high-risk': return 'bg-orange-500';
+      case 'dead': return 'bg-red-600';
+      default: return 'bg-gray-400';
+    }
+  };
+
+  const getHealthBadgeStyle = (health: 'healthy' | 'moderate' | 'high-risk' | 'dead') => {
+    switch (health) {
+      case 'healthy': return 'bg-green-100 text-green-800';
+      case 'moderate': return 'bg-amber-100 text-amber-800';
+      case 'high-risk': return 'bg-orange-100 text-orange-800';
+      case 'dead': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   const loadSubmissions = async () => {
     // 1. Fetch pending records from IndexedDB
@@ -30,8 +106,7 @@ export default function HistoryPage() {
     try {
       const { data, error } = await supabase
         .from('inspections')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
       if (!error && data) {
         remoteInsps = data;
       }
@@ -62,10 +137,12 @@ export default function HistoryPage() {
       ...mappedInsps
     ];
 
-    // Sort descending by date
-    const sorted = [...allSubmissions].sort(
-      (a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime()
-    );
+    // Sort descending by date (latest on top, oldest on bottom)
+    const sorted = [...allSubmissions].sort((a, b) => {
+      const dateA = parseDateMs(a.submitted_at || a.created_at || a.inspection_date);
+      const dateB = parseDateMs(b.submitted_at || b.created_at || b.inspection_date);
+      return dateB - dateA;
+    });
     setSubmissions(sorted);
   };
 
@@ -96,6 +173,11 @@ export default function HistoryPage() {
   useEffect(() => {
     let result = [...submissions];
 
+    // Plant ID URL param filter
+    if (plantIdParam) {
+      result = result.filter(sub => sub.plant_id?.toLowerCase() === plantIdParam.toLowerCase());
+    }
+
     // Status filter
     if (statusFilter !== 'all') {
       result = result.filter(sub => sub.sync_status === statusFilter);
@@ -115,7 +197,7 @@ export default function HistoryPage() {
     }
 
     setFilteredSubmissions(result);
-  }, [submissions, searchQuery, statusFilter]);
+  }, [submissions, searchQuery, statusFilter, plantIdParam]);
 
   const handleSyncNow = async () => {
     if (syncing) return;
@@ -158,14 +240,26 @@ export default function HistoryPage() {
     setSelectedPhotoUrl(null);
   };
 
-  const getFoliageColorDot = (color: string) => {
-    switch (color) {
-      case 'Green': return 'bg-zone-c';
-      case 'Yellow': return 'bg-amber-warning';
-      case 'Brown': return 'bg-orange-800';
-      case 'Red': return 'bg-zone-a';
-      default: return 'bg-gray-400';
-    }
+  const mapSunlight = (val: string | null) => {
+    if (!val) return 'N/A';
+    const mapping: Record<string, string> = {
+      bright: 'Bright (7-9 bars)',
+      bright_indirect: 'Bright indirect (4-6 bars)',
+      medium: 'Medium (2-3 bars)',
+      low: 'Low (0-1 bars)'
+    };
+    return mapping[val.toLowerCase()] || val;
+  };
+
+  const mapShade = (val: string | null) => {
+    if (!val) return 'N/A';
+    const mapping: Record<string, string> = {
+      light: 'Light (0-25%)',
+      partial: 'Partial (25-50%)',
+      moderate: 'Moderate (50-70%)',
+      heavy: 'Heavy (>70%)'
+    };
+    return mapping[val.toLowerCase()] || val;
   };
 
   const getPendingCountNum = submissions.filter(s => s.sync_status === 'pending').length;
@@ -218,8 +312,24 @@ export default function HistoryPage() {
         </div>
       </div>
 
+      {/* Plant ID active filter banner */}
+      {plantIdParam && (
+        <div className="mx-5 mt-4 px-4 py-2.5 bg-green-50 border border-green-100 rounded-2xl flex items-center justify-between shadow-xs">
+          <span className="text-xs font-bold text-primary flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-primary" />
+            Filtered for Plant: <span className="underline font-extrabold">{plantIdParam}</span>
+          </span>
+          <button
+            onClick={() => router.push('/history')}
+            className="text-[10px] font-bold text-text-secondary hover:text-primary flex items-center gap-1 bg-white border border-border-light px-2.5 py-1 rounded-full shadow-xs transition-colors"
+          >
+            Clear Filter <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Filter Tabs */}
-      <div className="px-5 py-3 flex gap-2 border-b border-border-light bg-white">
+      <div className="px-5 py-3 flex gap-2 border-b border-border-light bg-white mt-2">
         {(['all', 'synced', 'pending'] as const).map((status) => {
           const isSelected = statusFilter === status;
           const count = status === 'all'
@@ -254,46 +364,54 @@ export default function HistoryPage() {
             <p className="text-[10px] opacity-75 mt-0.5">Try adjusting query or log a new inspection.</p>
           </div>
         ) : (
-          filteredSubmissions.map((sub) => (
-            <button
-              key={sub.id}
-              onClick={() => handleOpenDetails(sub)}
-              className="w-full text-left bg-white rounded-2xl border border-border-light p-4 shadow-xs flex justify-between items-center hover:shadow-md hover:border-primary/20 transition-all duration-200"
-            >
-              <div className="flex items-center gap-3">
-                {/* Foliage color indicator */}
-                <div className={`h-3 w-3 rounded-full flex-shrink-0 ${getFoliageColorDot(sub.foliage_color)}`} />
-                <div>
-                  <h4 className="text-xs font-black text-text-primary">Plant {sub.plant_id}</h4>
-                  <p className="text-[9px] text-text-secondary mt-0.5">
-                    Zone {sub.zone} • Block {sub.block} • {sub.plant_type || 'Cutting'}
-                  </p>
-                  <p className="text-[10px] font-medium text-text-primary mt-1 line-clamp-1 max-w-[200px]">
-                    {sub.field_notes || sub.notes || 'No notes added.'}
-                  </p>
+          filteredSubmissions.map((sub) => {
+            const h = deriveHealth(sub);
+            return (
+              <button
+                key={sub.id}
+                onClick={() => handleOpenDetails(sub)}
+                className="w-full text-left bg-white rounded-2xl border border-border-light p-4 shadow-xs flex justify-between items-center hover:shadow-md hover:border-primary/20 transition-all duration-200"
+              >
+                <div className="flex items-center gap-3">
+                  {/* Health status dot */}
+                  <div className={`h-3 w-3 rounded-full flex-shrink-0 ${getHealthDotColor(h)}`} />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black text-text-primary">Plant {sub.plant_id}</h4>
+                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${getHealthBadgeStyle(h)}`}>
+                        {h === 'high-risk' ? 'High Risk' : h}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-text-secondary mt-0.5">
+                      Zone {sub.zone} • Block {sub.block} • {sub.plant_type || 'Cutting'}
+                    </p>
+                    <p className="text-[10px] font-medium text-text-primary mt-1 line-clamp-1 max-w-[200px]">
+                      {sub.field_notes || sub.notes || 'No notes added.'}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex flex-col items-end flex-shrink-0">
-                <span className="text-[9px] font-semibold text-text-secondary">
-                  {new Date(sub.submitted_at || sub.created_at).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric'
-                  })}
-                </span>
-                <span
-                  className={`inline-block text-[8px] font-bold px-1.5 py-0.5 rounded-full mt-1.5 uppercase ${
-                    sub.sync_status === 'synced'
-                      ? 'bg-pale-green text-primary'
-                      : 'bg-amber-warning/20 text-amber-700'
-                  }`}
-                >
-                  {sub.sync_status || 'pending'}
-                </span>
-                <ChevronRight className="h-4 w-4 text-text-secondary mt-1 opacity-50" />
-              </div>
-            </button>
-          ))
+                <div className="flex flex-col items-end flex-shrink-0">
+                  <span className="text-[9px] font-semibold text-text-secondary">
+                    {new Date(sub.submitted_at || sub.created_at).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </span>
+                  <span
+                    className={`inline-block text-[8px] font-bold px-1.5 py-0.5 rounded-full mt-1.5 uppercase ${
+                      sub.sync_status === 'synced'
+                        ? 'bg-pale-green text-primary'
+                        : 'bg-amber-warning/20 text-amber-700'
+                    }`}
+                  >
+                    {sub.sync_status || 'pending'}
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-text-secondary mt-1 opacity-50" />
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
 
@@ -333,12 +451,16 @@ export default function HistoryPage() {
               {/* General Specs */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Common Name</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.common_name || 'Vanilla'}</span>
+                  <span className="text-[8px] font-bold text-text-secondary uppercase">Soil EC</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">
+                    {selectedSub.soil_ec !== undefined && selectedSub.soil_ec !== null ? `${selectedSub.soil_ec} dS/m` : 'N/A'}
+                  </span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Variety</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.variety || 'Local'}</span>
+                  <span className="text-[8px] font-bold text-text-secondary uppercase">Moisture</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">
+                    {selectedSub.moisture !== undefined && selectedSub.moisture !== null ? `${selectedSub.moisture}%` : 'N/A'}
+                  </span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Vine Height</span>
@@ -351,12 +473,24 @@ export default function HistoryPage() {
                   <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.soil_pH ?? selectedSub.soil_ph ?? 'N/A'}</span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Moisture Status</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.watering_status || 'N/A'}</span>
+                  <span className="text-[8px] font-bold text-text-secondary uppercase">Temperature</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">
+                    {selectedSub.temperature !== undefined && selectedSub.temperature !== null ? `${selectedSub.temperature} °C` : (selectedSub.temperature_c !== undefined && selectedSub.temperature_c !== null ? `${selectedSub.temperature_c} °C` : 'N/A')}
+                  </span>
+                </div>
+                <div className="bg-surface rounded-xl p-3 border border-border-light">
+                  <span className="text-[8px] font-bold text-text-secondary uppercase">Humidity</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">
+                    {selectedSub.humidity !== undefined && selectedSub.humidity !== null ? `${selectedSub.humidity}%` : (selectedSub.humidity_pct !== undefined && selectedSub.humidity_pct !== null ? `${selectedSub.humidity_pct}%` : 'N/A')}
+                  </span>
                 </div>
                 <div className="bg-surface rounded-xl p-3 border border-border-light">
                   <span className="text-[8px] font-bold text-text-secondary uppercase">Sunlight</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.sunlight_level || 'N/A'}</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{mapSunlight(selectedSub.sunlight_level)}</span>
+                </div>
+                <div className="bg-surface rounded-xl p-3 border border-border-light">
+                  <span className="text-[8px] font-bold text-text-secondary uppercase">Shade Level</span>
+                  <span className="text-xs font-bold text-text-primary block mt-0.5">{mapShade(selectedSub.shade_level)}</span>
                 </div>
               </div>
 
@@ -368,6 +502,16 @@ export default function HistoryPage() {
                 </div>
                 <div className="text-[10px] text-text-secondary font-semibold">
                   Types: {Array.isArray(selectedSub.fertiliser_type) ? selectedSub.fertiliser_type.join(', ') : (selectedSub.fertiliser_type || 'N/A')}
+                </div>
+                <div className="text-[10px] text-text-secondary font-semibold flex items-center gap-1.5 mt-0.5">
+                  <span>Source:</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                    selectedSub.fertilizer_source === 'carried' 
+                      ? 'bg-pale-green text-primary' 
+                      : 'bg-orange-50 text-orange-600 border border-orange-100'
+                  }`}>
+                    {selectedSub.fertilizer_source || 'edited'}
+                  </span>
                 </div>
               </div>
 
@@ -406,5 +550,20 @@ export default function HistoryPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function HistoryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-text-secondary">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span className="text-xs font-semibold font-sans">Loading History...</span>
+        </div>
+      </div>
+    }>
+      <HistoryContent />
+    </Suspense>
   );
 }
