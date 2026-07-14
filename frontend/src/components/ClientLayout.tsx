@@ -1,54 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { isAuthenticated } from '../lib/authService';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 import BottomNav from './BottomNav';
 import OfflineBanner from './OfflineBanner';
 import { InspectionProvider } from '../context/InspectionContext';
 
-export default function ClientLayout({ children }: { children: React.ReactNode }) {
+// ─── Inner layout — consumes AuthContext ─────────────────────────────────────
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { status } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const [authChecked, setAuthChecked] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(false);
-
-  const checkAuth = () => {
-    try {
-      console.log('ClientLayout: Checking auth status for path:', pathname);
-      const authed = isAuthenticated();
-      setIsAuthed(authed);
-      setAuthChecked(true);
-
-      if (authed) {
-        if (pathname === '/') {
-          console.log('ClientLayout: User is authenticated, redirecting to /dashboard');
-          router.push('/dashboard');
-        }
-      } else {
-        if (pathname !== '/') {
-          console.log('ClientLayout: User is not authenticated, redirecting to login page /');
-          router.push('/');
-        }
-      }
-    } catch (error) {
-      console.error('ClientLayout: Error during checkAuth:', error);
-      // Ensure we clear the loading screen even if an error occurs
-      setAuthChecked(true);
-    }
-  };
 
   useEffect(() => {
-    checkAuth();
+    if (status === 'authorized' && pathname === '/') {
+      router.push('/dashboard');
+    }
+    if ((status === 'unauthenticated' || status === 'denied') && pathname !== '/') {
+      router.push('/');
+    }
+  }, [status, pathname, router]);
 
-    // Listen to custom auth changes
-    window.addEventListener('auth-status-change', checkAuth);
-
-    return () => {
-      window.removeEventListener('auth-status-change', checkAuth);
-    };
-  }, [pathname]);
-
+  // ── Service Worker ───────────────────────────────────────────────────────
   useEffect(() => {
     if (
       typeof window !== 'undefined' &&
@@ -56,29 +31,29 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       process.env.NODE_ENV === 'production'
     ) {
       navigator.serviceWorker.register('/sw.js')
-        .then((reg) => console.log('Service Worker registered successfully with scope:', reg.scope))
-        .catch((err) => console.error('Service Worker registration failed:', err));
+        .then((reg) => console.log('SW registered:', reg.scope))
+        .catch((err) => console.error('SW registration failed:', err));
     }
   }, []);
 
-
-  if (!authChecked) {
+  // ── Loading / checking states ────────────────────────────────────────────
+  if (status === 'loading' || status === 'checking') {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-surface">
         <div className="flex flex-col items-center gap-2">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <span className="text-sm font-medium text-text-secondary">Loading Vanilla Monitor...</span>
+          <span className="text-sm font-medium text-text-secondary">
+            {status === 'checking' ? 'Verifying access...' : 'Loading Vanilla Monitor...'}
+          </span>
         </div>
       </div>
     );
   }
 
-  // If not authenticated
-  if (!isAuthed) {
-    if (pathname === '/') {
-      return <>{children}</>;
-    }
-    // We are redirecting to '/' so render loader
+  // ── Login page (unauthenticated or denied) ───────────────────────────────
+  if (status === 'unauthenticated' || status === 'denied') {
+    if (pathname === '/') return <>{children}</>;
+    // Redirecting to '/' — show loader while redirect happens
     return (
       <div className="flex h-screen w-full items-center justify-center bg-surface">
         <div className="flex flex-col items-center gap-2">
@@ -89,8 +64,11 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     );
   }
 
-  // If authenticated
-  const hasOwnFooterNav = pathname?.startsWith('/inspect') || pathname?.startsWith('/add-plant');
+  // ── Authorized ────────────────────────────────────────────────────────────
+  const hasOwnFooterNav =
+    pathname?.startsWith('/inspect') ||
+    pathname?.startsWith('/add-plant') ||
+    pathname?.startsWith('/blocks');
 
   return (
     <InspectionProvider>
@@ -102,5 +80,15 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         {!hasOwnFooterNav && <BottomNav />}
       </div>
     </InspectionProvider>
+  );
+}
+
+// ─── Exported wrapper — provides AuthContext ──────────────────────────────────
+
+export default function ClientLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthProvider>
+      <AuthGate>{children}</AuthGate>
+    </AuthProvider>
   );
 }

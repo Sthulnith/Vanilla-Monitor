@@ -2,22 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { User, Database, LogOut, ShieldAlert } from 'lucide-react';
-import { getUserProfile, logoutGoogle } from '../../lib/authService';
+import { useAuth } from '../../context/AuthContext';
 import { getSubmissionsCount, getMortalityCount, clearAllTables } from '../../lib/offline-db';
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<any>(null);
+  const { supervisor, signOut } = useAuth();
 
   // DB stats
   const [recordsCount, setRecordsCount] = useState(0);
   const [mortalityCount, setMortalityCount] = useState(0);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
-  const loadData = async () => {
-    // Auth profile
-    const p = getUserProfile();
-    setProfile(p);
-
-    // Counts
+  const loadStats = async () => {
     const rCount = await getSubmissionsCount();
     const mCount = await getMortalityCount();
     setRecordsCount(rCount);
@@ -25,7 +21,7 @@ export default function ProfilePage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadStats();
   }, []);
 
   const [syncing, setSyncing] = useState(false);
@@ -36,7 +32,7 @@ export default function ProfilePage() {
       const { syncPendingSubmissions } = await import('../../lib/syncService');
       const result = await syncPendingSubmissions();
       alert(`Sync completed! Synced: ${result.synced}, Failed: ${result.failed}`);
-      await loadData();
+      await loadStats();
       window.dispatchEvent(new Event('submissions-updated'));
     } catch (error) {
       console.error('Sync failed:', error);
@@ -49,7 +45,7 @@ export default function ProfilePage() {
   const handleClearCache = async () => {
     if (confirm('CAUTION: This will delete ALL local inspections and dead vine reports from IndexedDB. Proceed?')) {
       await clearAllTables();
-      await loadData();
+      await loadStats();
       window.dispatchEvent(new Event('submissions-updated'));
       alert('Local database cache cleared successfully.');
     }
@@ -81,20 +77,21 @@ export default function ProfilePage() {
 
       <div className="p-5 space-y-6 flex-1 pb-24">
         {/* Supervisor Identity Card */}
-        {profile && (
+        {supervisor && (
           <div className="bg-white rounded-2xl border border-border-light p-4 shadow-sm flex items-center gap-4">
             <div className="h-12 w-12 rounded-full bg-primary-container text-white text-base font-extrabold flex items-center justify-center border border-white/20">
-              {getInitials(profile.name)}
+              {getInitials(supervisor.full_name || supervisor.email)}
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-extrabold text-text-primary">{profile.name}</h3>
-              <p className="text-xs text-text-secondary mt-0.5 font-medium">{profile.email}</p>
+              <h3 className="text-sm font-extrabold text-text-primary">{supervisor.full_name || supervisor.email}</h3>
+              <p className="text-xs text-text-secondary mt-0.5 font-medium">{supervisor.email}</p>
+              <span className="inline-block mt-1 rounded-full bg-green-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-green-700">
+                {supervisor.role}
+              </span>
             </div>
             <button
-              onClick={() => {
-                if (confirm('Are you sure you want to sign out?')) logoutGoogle();
-              }}
-              className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition"
+              onClick={() => setShowSignOutConfirm(true)}
+              className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition cursor-pointer"
               title="Sign Out"
             >
               <LogOut className="h-5 w-5" />
@@ -148,6 +145,36 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+      {showSignOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-xs w-full border border-border-light shadow-2xl space-y-4 text-center">
+            <div className="mx-auto w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-600">
+              <LogOut className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-text-primary">Sign Out</h3>
+              <p className="text-xs text-text-secondary mt-1">Are you sure you want to sign out of Vanilla Monitor?</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowSignOutConfirm(false)}
+                className="flex-grow py-2 text-xs font-bold text-text-secondary bg-surface border border-border-light rounded-xl hover:bg-surface-container transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowSignOutConfirm(false);
+                  await signOut();
+                }}
+                className="flex-grow py-2 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
