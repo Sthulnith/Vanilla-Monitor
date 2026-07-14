@@ -60,10 +60,32 @@ export default function Step3CareEnv() {
 
     const nowIso = new Date().toISOString();
 
+    const mapSunlightToLux = (val: string | null) => {
+      switch (val) {
+        case 'bright': return '>20,000 lux';
+        case 'bright_indirect': return '10,000-20,000 lux';
+        case 'medium': return '1,000-10,000 lux';
+        case 'low': return '<1,000 lux';
+        default: return null;
+      }
+    };
+
+    const mapShadeToPercentage = (val: string | null) => {
+      switch (val) {
+        case 'light': return '0-25%';
+        case 'partial': return '25-50%';
+        case 'moderate': return '50-70%';
+        case 'heavy': return '>70%';
+        default: return null;
+      }
+    };
+
     updateForm({
       watering_status: wateringStatus,
       sunlight_level: sunlightLevel,
+      sunlight_lux: mapSunlightToLux(sunlightLevel),
       shade_level: shadeLevel,
+      shade_percentage: mapShadeToPercentage(shadeLevel),
       soil_pH: soilPH,
       soil_pH_recorded_at: nowIso,
       temperature_c: tempNum,
@@ -87,8 +109,18 @@ export default function Step3CareEnv() {
   };
 
   const waterOptions = ['Dry out', 'Partially dry', 'Keep moist', 'High humidity'];
-  const sunOptions = ['Bright', 'Bright indirect', 'Medium', 'Low'];
-  const shadeOptions = ['Shade <75%', 'Shade >75%', 'Partial <50%', 'Partial >50%'];
+  const sunOptions = [
+    { value: 'bright', name: 'Bright', bars: '7-9 bars', lux: '>20,000 lux' },
+    { value: 'bright_indirect', name: 'Bright indirect', bars: '4-6 bars', lux: '10,000-20,000 lux' },
+    { value: 'medium', name: 'Medium', bars: '2-3 bars', lux: '1,000-10,000 lux' },
+    { value: 'low', name: 'Low', bars: '0-1 bars', lux: '<1,000 lux' }
+  ];
+  const shadeOptions = [
+    { value: 'light', name: 'Light', range: '0-25%' },
+    { value: 'partial', name: 'Partial', range: '25-50%' },
+    { value: 'moderate', name: 'Moderate', range: '50-70%' },
+    { value: 'heavy', name: 'Heavy', range: '>70%' }
+  ];
   const fertOptions = ['All purpose', 'Cactus', 'Acidic', 'Orchid'];
 
   return (
@@ -148,16 +180,21 @@ export default function Step3CareEnv() {
               <div className="grid grid-cols-2 gap-2 mt-1.5">
                 {sunOptions.map((opt) => (
                   <button
-                    key={opt}
+                    key={opt.value}
                     type="button"
-                    onClick={() => setSunlightLevel(opt)}
-                    className={`py-3 px-3 text-center text-xs font-bold rounded-2xl border transition-all ${
-                      sunlightLevel === opt
-                        ? 'bg-primary border-primary text-white'
-                        : 'border-border-light bg-white text-text-secondary hover:border-primary/20'
+                    onClick={() => setSunlightLevel(opt.value)}
+                    className={`py-3 px-2 text-center rounded-2xl border transition-all duration-200 ${
+                      sunlightLevel === opt.value
+                        ? 'bg-primary border-primary text-white shadow-xs'
+                        : 'border-border-light bg-white text-text-secondary hover:border-primary/20 hover:bg-surface'
                     }`}
                   >
-                    {opt}
+                    <span className="text-xs tracking-tight block truncate">
+                      <span className="font-bold">{opt.name}</span>
+                      <span className={`text-[10px] font-normal ${sunlightLevel === opt.value ? 'text-white/80' : 'text-text-secondary/80'}`}>
+                        {' • '}{opt.bars}
+                      </span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -168,16 +205,21 @@ export default function Step3CareEnv() {
               <div className="grid grid-cols-2 gap-2 mt-1.5">
                 {shadeOptions.map((opt) => (
                   <button
-                    key={opt}
+                    key={opt.value}
                     type="button"
-                    onClick={() => setShadeLevel(opt)}
-                    className={`py-3 px-3 text-center text-xs font-bold rounded-2xl border transition-all ${
-                      shadeLevel === opt
-                        ? 'bg-primary border-primary text-white'
-                        : 'border-border-light bg-white text-text-secondary hover:border-primary/20'
+                    onClick={() => setShadeLevel(opt.value)}
+                    className={`py-3 px-2 text-center rounded-2xl border transition-all duration-200 ${
+                      shadeLevel === opt.value
+                        ? 'bg-primary border-primary text-white shadow-xs'
+                        : 'border-border-light bg-white text-text-secondary hover:border-primary/20 hover:bg-surface'
                     }`}
                   >
-                    {opt}
+                    <span className="text-xs tracking-tight block truncate">
+                      <span className="font-bold">{opt.name}</span>
+                      <span className={`text-[10px] font-normal ${shadeLevel === opt.value ? 'text-white/80' : 'text-text-secondary/80'}`}>
+                        {' • '}{opt.range}
+                      </span>
+                    </span>
                   </button>
                 ))}
               </div>

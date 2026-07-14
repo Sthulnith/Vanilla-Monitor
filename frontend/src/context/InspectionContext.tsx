@@ -23,7 +23,9 @@ export interface InspectionFormState {
   // Step 3 — Care & environment
   watering_status: string | null; // 'Dry out' | 'Partially dry' | 'Keep moist' | 'High humidity'
   sunlight_level: string | null;  // 'Bright' | 'Bright indirect' | 'Medium' | 'Low'
+  sunlight_lux: string | null;
   shade_level: string | null;     // 'Shade <75%' | 'Shade >75%' | 'Partial <50%' | 'Partial >50%'
+  shade_percentage: string | null;
   soil_pH: number;
   soil_pH_recorded_at: string | null;
   temperature_c: number | null;
@@ -65,7 +67,9 @@ export const initialFormState: InspectionFormState = {
 
   watering_status: null,
   sunlight_level: null,
+  sunlight_lux: null,
   shade_level: null,
+  shade_percentage: null,
   soil_pH: 6.2,
   soil_pH_recorded_at: null,
   temperature_c: null,

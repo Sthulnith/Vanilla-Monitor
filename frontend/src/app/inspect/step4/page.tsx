@@ -56,11 +56,11 @@ export default function Step4GrowthTracker() {
   };
 
   const foliageOptions = [
-    { label: 'Green', color: 'bg-green-700' },
-    { label: 'Yellow', color: 'bg-amber-400' },
-    { label: 'Brown', color: 'bg-amber-900' },
-    { label: 'Red', color: 'bg-red-600' },
-    { label: 'Mixed', color: 'bg-gradient-to-r from-green-600 to-amber-900' },
+    { label: 'Green', bg: '#16A34A' },
+    { label: 'Yellow', bg: '#F59E0B' },
+    { label: 'Brown', bg: '#78350F' },
+    { label: 'Red', bg: '#EF4444' },
+    { label: 'Mixed', bg: 'linear-gradient(135deg, #16A34A 0%, #78350F 100%)', fullWidth: true },
   ];
 
   const arrangementOptions = [
@@ -175,7 +175,7 @@ export default function Step4GrowthTracker() {
           <h3 className="text-xs font-bold text-secondary uppercase tracking-widest mb-3.5">
             Foliage Color
           </h3>
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {foliageOptions.map((opt) => {
               const isSelected = foliageColor === opt.label;
               return (
@@ -184,13 +184,18 @@ export default function Step4GrowthTracker() {
                   type="button"
                   onClick={() => setFoliageColor(opt.label)}
                   className={`flex items-center gap-3 w-full p-2.5 rounded-xl border text-left transition-all ${
+                    opt.fullWidth ? 'col-span-2' : ''
+                  } ${
                     isSelected
                       ? 'border-primary bg-pale-green font-bold text-primary shadow-xs'
                       : 'border-border-light bg-white text-text-secondary hover:border-primary/10'
                   }`}
                 >
-                  <div className={`h-4.5 w-4.5 rounded-full border border-black/10 ${opt.color}`} />
-                  <span className="text-xs">{opt.label}</span>
+                  <div 
+                    className="h-4.5 w-4.5 rounded-full border border-black/10 shrink-0" 
+                    style={{ background: opt.bg }}
+                  />
+                  <span className="text-xs font-semibold">{opt.label}</span>
                 </button>
               );
             })}
