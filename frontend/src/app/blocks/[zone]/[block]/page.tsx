@@ -22,6 +22,8 @@ interface PlantWithHealth {
   health: HealthStatus;
   lastInspectionDate: string | null;
   lastVineHeight: number | null;
+  slot_id?: string;
+  generation?: number;
 }
 
 function deriveHealth(insp: any): HealthStatus {
@@ -291,7 +293,7 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
                 {/* Center Details */}
                 <div>
                   <h4 className="text-sm font-black text-text-primary leading-tight">
-                    {plant.plant_id}
+                    {plant.slot_id ? `${plant.slot_id} · G${plant.generation || 1}` : plant.plant_id}
                   </h4>
                   <p className="text-[10px] text-text-secondary mt-0.5">
                     {plant.common_name || 'Vanilla'} • {plant.variety || 'Local'} • Block {block}

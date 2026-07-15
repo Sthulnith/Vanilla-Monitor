@@ -17,7 +17,6 @@ export default function BottomNav() {
 
   const navItems = [
     { href: '/dashboard', label: 'Home', icon: 'Home' as const },
-    { href: '/new-inspection', label: 'Inspect', icon: 'Bug' as const },
     { href: '/digital-twin', label: 'Map', icon: 'Map' as const },
     { href: '/history', label: 'History', icon: 'History' as const },
     { href: '/profile', label: 'Profile', icon: 'User' as const },

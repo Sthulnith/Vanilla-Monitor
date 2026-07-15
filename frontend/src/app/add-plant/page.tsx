@@ -4,8 +4,19 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Compass, Download, QrCode } from 'lucide-react';
 import QRCode from 'qrcode';
-import { savePlantOfflineService, savePlantLocationOfflineService, syncPendingSubmissions } from '../../lib/syncService';
+import { savePlantOfflineService, savePlantLocationOfflineService, saveSlotOfflineService, syncPendingSubmissions } from '../../lib/syncService';
 import { PLANTATION } from '../../lib/plantData';
+import { getSlot, getPlant } from '../../lib/offline-db';
+
+function generateUUID() {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 export default function AddPlantPage() {
   const router = useRouter();
@@ -69,7 +80,7 @@ export default function AddPlantPage() {
     }
   }, [zone, block]);
 
-  // Compute Plant ID
+  // Compute Plant/Slot Code
   const plantId = `${zone}${block.padStart(2, '0')}-P${String(plantNo).padStart(3, '0')}`;
 
   // Step 4 Geolocation Capture
@@ -100,7 +111,8 @@ export default function AddPlantPage() {
   useEffect(() => {
     if (step === 5) {
       const qrData = JSON.stringify({
-        plant_id: plantId,
+        slot_id: plantId,
+        plant_id: plantId, // backward compatibility
         zone: zone,
         block: block,
         plant_no: String(plantNo)
@@ -124,12 +136,46 @@ export default function AddPlantPage() {
   const handleSavePlant = async () => {
     setLoading(true);
     try {
+      const newPlantId = generateUUID();
+      const slotId = plantId; // e.g. "C01-P002"
+
+      // Check if slot already exists and has an active plant
+      const existingSlot = await getSlot(slotId);
+      let oldPlant: any = null;
+      let nextGen = 1;
+      let oldPlantId = null;
+
+      if (existingSlot) {
+        oldPlantId = existingSlot.active_plant_id || existingSlot.activePlantId;
+        if (oldPlantId) {
+          oldPlant = await getPlant(oldPlantId);
+          if (oldPlant) {
+            nextGen = (oldPlant.generation || 1) + 1;
+          }
+        }
+      }
+
+      const slotRecord = {
+        slot_id: slotId,
+        zone,
+        block,
+        latitude: latitude || 0,
+        longitude: longitude || 0,
+        altitude: altitude || null,
+        accuracy: accuracy || null,
+        active_plant_id: newPlantId,
+        qr_value: slotId
+      };
+
       const plantRecord = {
-        plant_id: plantId,
+        plant_id: newPlantId,
+        slot_id: slotId,
+        generation: nextGen,
+        status: 'active',
         zone,
         block,
         plant_no: plantNo,
-        qr_code: plantId,
+        qr_code: slotId,
         qr_image_url: qrCodeUrl || null,
         common_name: commonName || null,
         latin_name: latinName || null,
@@ -147,11 +193,14 @@ export default function AddPlantPage() {
         land_type: landType || null,
         agricultural_land_type: agriculturalLandType || null,
         landform_type: landformType || null,
-        support_tree_type: supportTreeType || null
+        support_tree_type: supportTreeType || null,
+        previous_plant_id: oldPlantId || null,
+        replaced_by_plant_id: null,
+        retired_date: null
       };
 
       const locationRecord = {
-        plant_id: plantId,
+        plant_id: newPlantId,
         latitude: latitude || 0,
         longitude: longitude || 0,
         altitude: altitude || null,
@@ -159,13 +208,29 @@ export default function AddPlantPage() {
       };
 
       // Save offline
+      await saveSlotOfflineService(slotRecord);
       await savePlantOfflineService(plantRecord);
       await savePlantLocationOfflineService(locationRecord);
+
+      // Update old plant if it existed
+      if (oldPlantId && oldPlant) {
+        const updatedOldPlant = {
+          ...oldPlant,
+          status: 'replaced',
+          retired_date: plantedDate ? new Date(plantedDate).toISOString() : new Date().toISOString(),
+          replaced_by_plant_id: newPlantId,
+          sync_status: 'pending'
+        };
+        await savePlantOfflineService(updatedOldPlant);
+      }
 
       // Trigger sync
       syncPendingSubmissions().catch(err => console.error('Sync failed:', err));
 
-      alert(`Plant ${plantId} registered successfully!`);
+      alert(oldPlantId
+        ? `Plant replacement registered successfully with unique ID at Slot ${slotId} (Gen ${nextGen})!`
+        : `Plant registered successfully with unique ID at Slot ${slotId}!`
+      );
       router.push('/dashboard');
     } catch (err: any) {
       console.error(err);

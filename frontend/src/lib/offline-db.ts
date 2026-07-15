@@ -1,7 +1,7 @@
 import { openDB, IDBPDatabase } from 'idb';
 
 const DB_NAME = 'vanilla-monitor';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface VanillaMonitorDB {
   submissions: {
@@ -35,6 +35,11 @@ interface VanillaMonitorDB {
     key: string;
     value: any;
     indexes: { sync_status: string; plant_id: string };
+  };
+  slots: {
+    key: string;
+    value: any;
+    indexes: { sync_status: string };
   };
 }
 
@@ -86,6 +91,14 @@ function getDB() {
             inspStore.createIndex('plant_id', 'plant_id');
           }
         }
+
+        // Version 3 stores (Slots)
+        if (oldVersion < 3) {
+          if (!db.objectStoreNames.contains('slots')) {
+            const slotsStore = db.createObjectStore('slots', { keyPath: 'slot_id' });
+            slotsStore.createIndex('sync_status', 'sync_status');
+          }
+        }
       },
     });
   }
@@ -124,8 +137,9 @@ export async function getPendingCount(): Promise<number> {
   const pendingPlants = await getPendingPlants();
   const pendingLocations = await getPendingPlantLocations();
   const pendingInspections = await getPendingInspections();
+  const pendingSlots = await getPendingSlots();
   
-  return pendingSubmissions.length + pendingPlants.length + pendingLocations.length + pendingInspections.length;
+  return pendingSubmissions.length + pendingPlants.length + pendingLocations.length + pendingInspections.length + pendingSlots.length;
 }
 
 export async function markAsSyncedInDB(id: string, photoUrl?: string): Promise<void> {
@@ -189,6 +203,105 @@ export async function getAllPlantGPS(): Promise<any[]> {
 }
 
 // ----------------- NEW ENTITY DB OPERATIONS -----------------
+
+// Slots Store
+export async function saveSlotOffline(slot: any): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  await db.put('slots', slot);
+}
+
+export async function getSlot(slotId: string): Promise<any | null> {
+  const db = await getDB();
+  if (!db) return null;
+  return db.get('slots', slotId);
+}
+
+export async function getSlots(): Promise<any[]> {
+  const db = await getDB();
+  if (!db) return [];
+  return db.getAll('slots');
+}
+
+export async function getPendingSlots(): Promise<any[]> {
+  const db = await getDB();
+  if (!db) return [];
+  return db.getAllFromIndex('slots', 'sync_status', 'pending');
+}
+
+export async function markSlotAsSynced(slotId: string): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  const slot = await db.get('slots', slotId);
+  if (slot) {
+    slot.sync_status = 'synced';
+    await db.put('slots', slot);
+  }
+}
+
+export async function registerReplacement(slotId: string, newPlantData: any): Promise<string> {
+  const db = await getDB();
+  if (!db) throw new Error('IndexedDB not initialized');
+
+  const tx = db.transaction(['slots', 'plants'], 'readwrite');
+  const slotsStore = tx.objectStore('slots');
+  const plantsStore = tx.objectStore('plants');
+
+  // 1. Read the slot and its current active plant
+  const slot = await slotsStore.get(slotId);
+  if (!slot) throw new Error(`Slot with ID ${slotId} not found`);
+
+  const oldPlantId = slot.active_plant_id || slot.activePlantId;
+  let oldPlant: any = null;
+  if (oldPlantId) {
+    oldPlant = await plantsStore.get(oldPlantId);
+  }
+
+  // 2. Generate a new plant ID using crypto.randomUUID()
+  const newPlantId = crypto.randomUUID();
+
+  // 3. Create the NEW plant
+  const newPlant = {
+    plant_id: newPlantId,
+    slot_id: slotId,
+    variety: newPlantData.variety || oldPlant?.variety || 'Vanilla planifolia',
+    plant_type: newPlantData.plant_type || oldPlant?.plant_type || 'Cutting',
+    planting_arrangement: newPlantData.planting_arrangement || oldPlant?.planting_arrangement || 'Contour Pattern',
+    spacing_between_hedges: newPlantData.spacing_between_hedges || oldPlant?.spacing_between_hedges || '1.5 m x 1.5 m',
+    spacing_between_rows: newPlantData.spacing_between_rows || oldPlant?.spacing_between_rows || '1.5 m x 1.5 m',
+    land_type: newPlantData.land_type || oldPlant?.land_type || 'Forest Land',
+    agricultural_land_type: newPlantData.agricultural_land_type || oldPlant?.agricultural_land_type || 'Arable Crop Land',
+    landform_type: newPlantData.landform_type || oldPlant?.landform_type || 'Upland Hillslope',
+    support_tree_type: newPlantData.support_tree_type || oldPlant?.support_tree_type || 'Glyricidia',
+    planted_date: newPlantData.planted_date || new Date().toISOString().split('T')[0],
+    status: 'active',
+    generation: (oldPlant?.generation || 0) + 1,
+    previous_plant_id: oldPlantId || null,
+    replaced_by_plant_id: null,
+    retired_date: null,
+    created_at: new Date().toISOString(),
+    sync_status: 'pending'
+  };
+
+  // 4. Update the OLD plant if exists
+  if (oldPlantId && oldPlant) {
+    oldPlant.status = 'replaced';
+    oldPlant.retired_date = new Date().toISOString().split('T')[0];
+    oldPlant.replaced_by_plant_id = newPlantId;
+    oldPlant.sync_status = 'pending';
+    await plantsStore.put(oldPlant);
+  }
+
+  // 5. Update the slot
+  slot.active_plant_id = newPlantId;
+  slot.sync_status = 'pending';
+
+  await plantsStore.put(newPlant);
+  await slotsStore.put(slot);
+
+  await tx.done;
+  return newPlantId;
+}
 
 // Plants Store
 export async function savePlantOffline(plant: any): Promise<void> {
@@ -368,7 +481,7 @@ export async function deleteInspection(id: string): Promise<void> {
 export async function clearAllTables(): Promise<void> {
   const db = await getDB();
   if (!db) return;
-  const tx = db.transaction(['submissions', 'mortality_reports', 'plant_gps', 'settings', 'plants', 'plant_locations', 'inspections'], 'readwrite');
+  const tx = db.transaction(['submissions', 'mortality_reports', 'plant_gps', 'settings', 'plants', 'plant_locations', 'inspections', 'slots'], 'readwrite');
   await Promise.all([
     tx.objectStore('submissions').clear(),
     tx.objectStore('mortality_reports').clear(),
@@ -377,6 +490,7 @@ export async function clearAllTables(): Promise<void> {
     tx.objectStore('plants').clear(),
     tx.objectStore('plant_locations').clear(),
     tx.objectStore('inspections').clear(),
+    tx.objectStore('slots').clear(),
     tx.done
   ]);
 }

@@ -186,10 +186,15 @@ export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: 
         <div className="flex items-start justify-between">
           <div>
             <span className="text-[9px] uppercase font-bold text-green-light tracking-widest">
-              Zone {plant.zone} · Block {plant.block}
+              Zone {plant.zone} · Block {plant.block} {plant.slot_id ? `· Slot ${plant.slot_id}` : ''}
             </span>
-            <h1 className="text-2xl font-black mt-1">{plant.plant_id}</h1>
-            <p className="text-xs text-green-pale/80 font-medium mt-0.5">
+            <h1 className="text-2xl font-black mt-1">
+              {plant.slot_id ? `${plant.slot_id} · G${plant.generation || 1}` : plant.plant_id}
+            </h1>
+            <p className="text-[10px] text-green-pale/80 font-medium mt-0.5">
+              Plant ID: {plant.plant_id}
+            </p>
+            <p className="text-[10px] text-green-pale/70 font-medium">
               {plant.common_name || 'Vanilla'} · {plant.variety || 'Local'} · {plant.plant_type || 'Cutting'}
             </p>
           </div>
@@ -226,6 +231,34 @@ export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: 
           <Row label="Variety" value={plant.variety} />
           <Row label="Type of Plant" value={plant.plant_type} />
         </Section>
+
+        {/* Lineage Information */}
+        {(plant.previous_plant_id || plant.replaced_by_plant_id) && (
+          <Section title="Vine Lineage & Replacements" icon={<RefreshCw className="h-3.5 w-3.5" />}>
+            {plant.previous_plant_id && (
+              <div className="flex justify-between items-center text-[10px]">
+                <span className="text-text-secondary font-medium">Previous Generation</span>
+                <button
+                  onClick={() => router.push(`/plant/${plant.previous_plant_id}`)}
+                  className="font-bold text-primary hover:underline"
+                >
+                  View Previous Vine (G{(plant.generation || 2) - 1})
+                </button>
+              </div>
+            )}
+            {plant.replaced_by_plant_id && (
+              <div className="flex justify-between items-center text-[10px] mt-2 pt-2 border-t border-border-light">
+                <span className="text-text-secondary font-medium">Replaced By</span>
+                <button
+                  onClick={() => router.push(`/plant/${plant.replaced_by_plant_id}`)}
+                  className="font-bold text-amber-600 hover:underline"
+                >
+                  View Successor Vine (G{(plant.generation || 1) + 1})
+                </button>
+              </div>
+            )}
+          </Section>
+        )}
 
         {/* Section 2 — Purchase Information */}
         <Section title="Purchase Information" icon={<Calendar className="h-3.5 w-3.5" />}>

@@ -82,6 +82,7 @@ CREATE TABLE inspections (
     photo_url TEXT,
     
     sync_status TEXT DEFAULT 'synced',
+    reading_source JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 

@@ -420,7 +420,7 @@ function HistoryContent() {
                   <div className={`h-3 w-3 rounded-full flex-shrink-0 ${getHealthDotColor(h)}`} />
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-black text-text-primary">Plant {sub.plant_id}</h4>
+                      <h4 className="text-xs font-black text-text-primary">Plant {sub.slot_id || sub.plant_id}</h4>
                       <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${getHealthBadgeStyle(h)}`}>
                         {h === 'high-risk' ? 'High Risk' : h}
                       </span>
@@ -469,7 +469,7 @@ function HistoryContent() {
                   Inspection Details
                 </span>
                 <h3 className="font-extrabold text-sm mt-0.5">
-                  Plant {selectedSub.plant_id} Observation
+                  Plant {selectedSub.slot_id || selectedSub.plant_id} Observation
                 </h3>
               </div>
               <button onClick={handleCloseDetails} className="text-white/80 hover:text-white">
@@ -485,7 +485,7 @@ function HistoryContent() {
                 </div>
                 <h4 className="font-extrabold text-base text-text-primary">Delete Submission Report?</h4>
                 <p className="text-xs text-text-secondary leading-relaxed max-w-[240px]">
-                  Are you sure you want to delete the inspection report for <span className="font-bold text-text-primary">Plant {selectedSub.plant_id}</span>?
+                  Are you sure you want to delete the inspection report for <span className="font-bold text-text-primary">Plant {selectedSub.slot_id || selectedSub.plant_id}</span>?
                   {selectedSub.sync_status === 'synced' ? (
                     <span className="block mt-2 text-red-500 font-semibold">
                       Warning: This report is synced. Deleting it will remove it from both Supabase and local cache.
@@ -614,6 +614,7 @@ function HistoryContent() {
                   {/* Sync details */}
                   <div className="text-[9px] text-text-secondary space-y-0.5 pt-2 border-t border-border-light font-medium">
                     <div>ID: {selectedSub.id}</div>
+                    {selectedSub.slot_id && <div>Plant ID: {selectedSub.plant_id}</div>}
                     <div>Supervisor: {selectedSub.supervisor_name} ({selectedSub.supervisor_email})</div>
                     <div>Submitted: {new Date(selectedSub.submitted_at || selectedSub.created_at).toLocaleString()}</div>
                     <div className="flex items-center gap-1 mt-1">

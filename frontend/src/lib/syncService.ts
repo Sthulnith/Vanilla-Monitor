@@ -14,7 +14,11 @@ import {
   savePlantLocationOffline as saveLocalLoc,
   saveInspectionOffline as saveLocalInsp,
   getSetting,
-  saveSetting
+  saveSetting,
+  getPendingSlots,
+  markSlotAsSynced,
+  saveSlotOffline as saveLocalSlot,
+  getSlot
 } from './offline-db';
 import { appendToSheets, buildSheetRow } from './sheetsService';
 import { supabase } from './supabaseClient';
@@ -84,7 +88,7 @@ export async function savePlantOfflineService(plantData: any): Promise<void> {
   const plant = {
     ...plantData,
     sync_status: 'pending',
-    created_at: new Date().toISOString()
+    created_at: plantData.created_at || new Date().toISOString()
   };
   await saveLocalPlant(plant);
 }
@@ -96,9 +100,21 @@ export async function savePlantLocationOfflineService(locationData: any): Promis
   const location = {
     ...locationData,
     sync_status: 'pending',
-    created_at: new Date().toISOString()
+    created_at: locationData.created_at || new Date().toISOString()
   };
   await saveLocalLoc(location);
+}
+
+/**
+ * Saves a new slot offline in IndexedDB.
+ */
+export async function saveSlotOfflineService(slotData: any): Promise<void> {
+  const slot = {
+    ...slotData,
+    sync_status: 'pending',
+    created_at: slotData.created_at || new Date().toISOString()
+  };
+  await saveLocalSlot(slot);
 }
 
 /**
@@ -211,6 +227,47 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
 
   let synced = 0;
   let failed = 0;
+
+  // 0. Sync Pending Slots → Supabase directly
+  try {
+    const pendingSlots = await getPendingSlots();
+    for (const slot of pendingSlots) {
+      try {
+        const payload = { ...slot };
+        delete payload.sync_status;
+
+        // Ensure camelCase keys map to snake_case if any client created them that way
+        const formattedPayload = {
+          slot_id: payload.slot_id || payload.slotId,
+          zone: payload.zone,
+          block: payload.block,
+          latitude: payload.latitude || payload.gps?.lat || null,
+          longitude: payload.longitude || payload.gps?.lng || null,
+          altitude: payload.altitude || null,
+          accuracy: payload.accuracy || null,
+          active_plant_id: payload.active_plant_id || payload.activePlantId || null,
+          qr_value: payload.qr_value || payload.qrValue || null,
+          created_at: payload.created_at || new Date().toISOString()
+        };
+
+        const { error } = await supabase
+          .from('slots')
+          .upsert(formattedPayload, { onConflict: 'slot_id' });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        await markSlotAsSynced(slot.slot_id);
+        synced++;
+      } catch (err) {
+        console.error(`Sync failed for slot ${slot.slot_id}:`, err);
+        failed++;
+      }
+    }
+  } catch (err) {
+    console.error('Error syncing slots:', err);
+  }
 
   // 1. Sync Pending Plants → Supabase directly
   try {
@@ -374,6 +431,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           notes: inspection.notes,
           photo_url: supabasePhotoUrl || inspection.photo_url,
           fertilizer_source: inspection.fertilizer_source || 'carried',
+          reading_source: inspection.reading_source || {},
           sync_status: 'synced'
         };
 
@@ -613,17 +671,41 @@ export async function syncCarriedFertilizer(): Promise<void> {
  * Fetches all registered plants and their locations from Supabase and saves them
  * to the local IndexedDB database. This ensures they are available offline.
  */
-export async function pullPlantsFromSupabase(): Promise<{ plantsCount: number; locationsCount: number }> {
-  if (typeof window === 'undefined') return { plantsCount: 0, locationsCount: 0 };
+export async function pullPlantsFromSupabase(): Promise<{ slotsCount: number; plantsCount: number; locationsCount: number }> {
+  if (typeof window === 'undefined') return { slotsCount: 0, plantsCount: 0, locationsCount: 0 };
   const isMockOffline = localStorage.getItem('mock_offline') === 'true';
   if (isMockOffline || !navigator.onLine) {
-    return { plantsCount: 0, locationsCount: 0 };
+    return { slotsCount: 0, plantsCount: 0, locationsCount: 0 };
   }
 
+  let slotsCount = 0;
   let plantsCount = 0;
   let locationsCount = 0;
 
   try {
+    // 0. Fetch slots
+    const { data: slotsData, error: slotsError } = await supabase
+      .from('slots')
+      .select('*');
+
+    if (slotsError) {
+      throw new Error(slotsError.message);
+    }
+
+    if (slotsData && slotsData.length > 0) {
+      for (const slot of slotsData) {
+        const existingLocal = await getSlot(slot.slot_id);
+        if (existingLocal?.sync_status === 'pending') {
+          continue;
+        }
+        await saveLocalSlot({
+          ...slot,
+          sync_status: 'synced'
+        });
+        slotsCount++;
+      }
+    }
+
     // 1. Fetch plants
     const { data: plantsData, error: plantsError } = await supabase
       .from('plants')
@@ -678,7 +760,7 @@ export async function pullPlantsFromSupabase(): Promise<{ plantsCount: number; l
     console.error('Error pulling plants/locations from Supabase:', err);
   }
 
-  return { plantsCount, locationsCount };
+  return { slotsCount, plantsCount, locationsCount };
 }
 
 // Auto-sync

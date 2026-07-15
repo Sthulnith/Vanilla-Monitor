@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Check, Camera, Sparkles, Droplet, Thermometer, Ruler, AlertCircle, Lock, Unlock } from 'lucide-react';
+import { ArrowLeft, Check, Camera, Sparkles, Droplet, Thermometer, Ruler, AlertCircle, Lock, Unlock, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { getPlant, getPreviousHeight, getSetting, saveSetting, savePlantOffline } from '../../../lib/offline-db';
 import { saveInspectionOfflineService, syncPendingSubmissions } from '../../../lib/syncService';
 import { supabase } from '../../../lib/supabaseClient';
+import { processMeterImage, MOCK_OCR_TEMPLATES } from '../../../lib/meterOcr';
 
 export default function InspectFormPage() {
   const router = useRouter();
@@ -43,6 +44,221 @@ export default function InspectFormPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>('');
+
+  // OCR Meter Reading States
+  const [readingSources, setReadingSources] = useState<Record<string, 'manual' | 'ocr_confirmed' | 'ocr_edited'>>({
+    soilPh: 'manual',
+    soilEc: 'manual',
+    temperature: 'manual',
+    humidity: 'manual',
+    moisture: 'manual',
+    sunlightLevel: 'manual'
+  });
+  const [ocrModalOpen, setOcrModalOpen] = useState(false);
+  const [activeStep, setActiveStep] = useState<'capture' | 'confirm'>('capture');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('perfect');
+  const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
+  const [ocrBinarizedUrl, setOcrBinarizedUrl] = useState<string | null>(null);
+
+  // OCR Confirm Form States (prefilled from scan)
+  const [modalPh, setModalPh] = useState<string>('');
+  const [modalEc, setModalEc] = useState<string>('');
+  const [modalTemp, setModalTemp] = useState<string>('');
+  const [modalHumid, setModalHumid] = useState<string>('');
+  const [modalLight, setModalLight] = useState<string>('');
+  const [modalMoist, setModalMoist] = useState<string>('');
+
+  const [ocrUnitError, setOcrUnitError] = useState<string | null>(null);
+  const [ocrValidationError, setOcrValidationError] = useState<string | null>(null);
+
+  const handlePhChange = (val: number) => {
+    setSoilPh(val);
+    setReadingSources(prev => ({
+      ...prev,
+      soilPh: prev.soilPh === 'ocr_confirmed' ? 'ocr_edited' : prev.soilPh
+    }));
+  };
+
+  const handleEcChange = (val: string) => {
+    setSoilEc(val);
+    setReadingSources(prev => ({
+      ...prev,
+      soilEc: prev.soilEc === 'ocr_confirmed' ? 'ocr_edited' : prev.soilEc
+    }));
+  };
+
+  const handleMoistureChange = (val: string) => {
+    setMoisture(val);
+    setReadingSources(prev => ({
+      ...prev,
+      moisture: prev.moisture === 'ocr_confirmed' ? 'ocr_edited' : prev.moisture
+    }));
+  };
+
+  const handleTempChange = (val: string) => {
+    setTemperature(val);
+    setReadingSources(prev => ({
+      ...prev,
+      temperature: prev.temperature === 'ocr_confirmed' ? 'ocr_edited' : prev.temperature
+    }));
+  };
+
+  const handleHumidityChange = (val: string) => {
+    setHumidity(val);
+    setReadingSources(prev => ({
+      ...prev,
+      humidity: prev.humidity === 'ocr_confirmed' ? 'ocr_edited' : prev.humidity
+    }));
+  };
+
+  const handleSunlightChange = (val: string) => {
+    setSunlightLevel(val);
+    setReadingSources(prev => ({
+      ...prev,
+      sunlightLevel: prev.sunlightLevel === 'ocr_confirmed' ? 'ocr_edited' : prev.sunlightLevel
+    }));
+  };
+
+  const startScanner = () => {
+    setOcrModalOpen(true);
+    setActiveStep('capture');
+    setSelectedTemplate('perfect');
+    setOcrPreviewUrl(null);
+    setOcrBinarizedUrl(null);
+    setOcrUnitError(null);
+    setOcrValidationError(null);
+  };
+
+  const handleOcrFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsOcrAnalyzing(true);
+    const preview = URL.createObjectURL(file);
+    setOcrPreviewUrl(preview);
+    
+    const img = new Image();
+    img.src = preview;
+    img.onload = async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+      }
+      
+      setTimeout(async () => {
+        const res = await processMeterImage(canvas);
+        setOcrBinarizedUrl(res.binarizedDataUrl);
+        setModalPh(res.data.ph !== null ? String(res.data.ph) : '');
+        setModalEc(res.data.ec !== null ? String(res.data.ec) : '');
+        setModalTemp(res.data.temperature !== null ? String(res.data.temperature) : '');
+        setModalHumid(res.data.humidity !== null ? String(res.data.humidity) : '');
+        setModalLight(res.data.lightBars !== null ? String(res.data.lightBars) : '');
+        setModalMoist(res.data.moistCells !== null ? String(res.data.moistCells) : '');
+        
+        setOcrUnitError(res.unitError);
+        setOcrValidationError(res.validationError);
+        setIsOcrAnalyzing(false);
+        setActiveStep('confirm');
+      }, 1200);
+    };
+  };
+
+  const handleTemplateScan = async () => {
+    setIsOcrAnalyzing(true);
+    setTimeout(async () => {
+      const dummyCanvas = document.createElement('canvas');
+      dummyCanvas.width = 300;
+      dummyCanvas.height = 150;
+      const res = await processMeterImage(dummyCanvas, selectedTemplate as any);
+      
+      setOcrPreviewUrl(null);
+      setOcrBinarizedUrl(res.binarizedDataUrl);
+      setModalPh(res.data.ph !== null ? String(res.data.ph) : '');
+      setModalEc(res.data.ec !== null ? String(res.data.ec) : '');
+      setModalTemp(res.data.temperature !== null ? String(res.data.temperature) : '');
+      setModalHumid(res.data.humidity !== null ? String(res.data.humidity) : '');
+      setModalLight(res.data.lightBars !== null ? String(res.data.lightBars) : '');
+      setModalMoist(res.data.moistCells !== null ? String(res.data.moistCells) : '');
+      
+      setOcrUnitError(res.unitError);
+      setOcrValidationError(res.validationError);
+      setIsOcrAnalyzing(false);
+      setActiveStep('confirm');
+    }, 1200);
+  };
+
+  const getDynamicErrors = () => {
+    let uError = ocrUnitError;
+    let vError = ocrValidationError;
+    
+    const phNum = Number(modalPh);
+    if (!isNaN(phNum) && phNum === 0.0 && modalPh !== '') {
+      vError = 'Soil pH is 0.0. Check if the probe is fully inserted in moist soil.';
+    } else if (phNum > 0.0 || modalPh === '') {
+      if (vError && vError.includes('pH is 0.0')) {
+        vError = null;
+      }
+    }
+    
+    const tempNum = Number(modalTemp);
+    if (!isNaN(tempNum) && tempNum > 50 && selectedTemplate === 'custom') {
+      uError = 'Temperature is in °F. Please click unit toggle on the meter to switch to °C.';
+    }
+    
+    return { uError, vError };
+  };
+
+  const confirmOcrValues = () => {
+    const { uError } = getDynamicErrors();
+    if (uError) {
+      alert('Cannot confirm with unit errors. Please switch the units and retake the photo.');
+      return;
+    }
+    
+    if (modalPh !== '') {
+      setSoilPh(Number(modalPh));
+      setReadingSources(prev => ({ ...prev, soilPh: 'ocr_confirmed' }));
+    }
+    if (modalEc !== '') {
+      setSoilEc(modalEc);
+      setReadingSources(prev => ({ ...prev, soilEc: 'ocr_confirmed' }));
+    }
+    if (modalTemp !== '') {
+      setTemperature(modalTemp);
+      setReadingSources(prev => ({ ...prev, temperature: 'ocr_confirmed' }));
+    }
+    if (modalHumid !== '') {
+      setHumidity(modalHumid);
+      setReadingSources(prev => ({ ...prev, humidity: 'ocr_confirmed' }));
+    }
+    if (modalMoist !== '') {
+      setMoisture(modalMoist);
+      setReadingSources(prev => ({ ...prev, moisture: 'ocr_confirmed' }));
+      
+      const moistVal = Number(modalMoist);
+      if (moistVal <= 2) setWateringStatus('Dry out');
+      else if (moistVal <= 5) setWateringStatus('Partially dry');
+      else if (moistVal <= 8) setWateringStatus('Keep moist');
+      else setWateringStatus('High humidity');
+    }
+    if (modalLight !== '') {
+      const lightVal = Number(modalLight);
+      let level = 'bright_indirect';
+      if (lightVal <= 1) level = 'low';
+      else if (lightVal <= 3) level = 'medium';
+      else if (lightVal <= 6) level = 'bright_indirect';
+      else level = 'bright';
+      
+      setSunlightLevel(level);
+      setReadingSources(prev => ({ ...prev, sunlightLevel: 'ocr_confirmed' }));
+    }
+    
+    setOcrModalOpen(false);
+  };
 
   useEffect(() => {
     if (!plantId) {
@@ -241,7 +457,8 @@ export default function InspectFormPage() {
         vine_height_cm: vineHeight ? Number(vineHeight) : null,
         foliage_color: foliageColor,
         notes: notes || null,
-        fertilizer_source: hasBeenUnlocked ? 'edited' : 'carried'
+        fertilizer_source: hasBeenUnlocked ? 'edited' : 'carried',
+        reading_source: readingSources
       };
 
       // Save offline
@@ -294,10 +511,17 @@ export default function InspectFormPage() {
             <span className="text-[9px] font-bold text-primary px-2 py-0.5 rounded-full bg-pale-green">
               Active Plant ID
             </span>
-            <h2 className="text-lg font-black text-text-primary mt-1">{staticDetails.plant_id}</h2>
+            <h2 className="text-lg font-black text-text-primary mt-1">
+              {staticDetails.slot_id ? `${staticDetails.slot_id} · G${staticDetails.generation || 1}` : staticDetails.plant_id}
+            </h2>
             <p className="text-[10px] text-text-secondary mt-0.5">
               {staticDetails.common_name} ({staticDetails.variety}) • Zone {staticDetails.zone} • Block {staticDetails.block}
             </p>
+            {staticDetails.slot_id && (
+              <p className="text-[9px] text-text-secondary mt-0.5">
+                Plant ID: {staticDetails.plant_id}
+              </p>
+            )}
           </div>
           <div className="text-right">
             <span className="text-[9px] font-bold text-text-secondary block">Last Height</span>
@@ -336,7 +560,18 @@ export default function InspectFormPage() {
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-text-secondary uppercase block mb-1.5">Sunlight Level</label>
+              <label className="text-[10px] font-bold text-text-secondary uppercase mb-1.5 flex items-center justify-between">
+                <span>Sunlight Level</span>
+                {readingSources.sunlightLevel !== 'manual' && (
+                  <span className={`text-[8.5px] font-bold px-2 py-0.5 rounded-full ${
+                    readingSources.sunlightLevel === 'ocr_confirmed' 
+                      ? 'bg-green-100 text-green-700' 
+                      : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {readingSources.sunlightLevel === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                  </span>
+                )}
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { value: 'bright', name: 'Bright', bars: '7-9 bars', lux: '>20,000 lux' },
@@ -347,7 +582,7 @@ export default function InspectFormPage() {
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => setSunlightLevel(opt.value)}
+                    onClick={() => handleSunlightChange(opt.value)}
                     className={`py-3 px-2 rounded-xl text-center border transition-all duration-200 ${
                       sunlightLevel === opt.value
                         ? 'bg-primary text-white border-primary shadow-xs'
@@ -399,10 +634,22 @@ export default function InspectFormPage() {
 
         {/* SECTION 2: ENVIRONMENT */}
         <div className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-secondary flex items-center gap-1">
-            <Thermometer className="h-3.5 w-3.5 text-primary" />
-            Environment & Soil
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-secondary flex items-center gap-1">
+              <Thermometer className="h-3.5 w-3.5 text-primary" />
+              Environment & Soil
+            </h3>
+            
+            {/* Scan Meter Button */}
+            <button
+              type="button"
+              onClick={startScanner}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-bold bg-primary text-white border-primary hover:bg-primary/95 shadow-xs transition-all"
+            >
+              <Camera className="h-3.5 w-3.5" />
+              <span>Scan Meter</span>
+            </button>
+          </div>
           
           <div className="bg-white rounded-2xl p-4 border border-border-light space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -421,12 +668,23 @@ export default function InspectFormPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Soil pH</label>
+                <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                  <span>Soil pH</span>
+                  {readingSources.soilPh !== 'manual' && (
+                    <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full ${
+                      readingSources.soilPh === 'ocr_confirmed' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {readingSources.soilPh === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   step="0.1"
                   value={soilPh}
-                  onChange={(e) => setSoilPh(Number(e.target.value))}
+                  onChange={(e) => handlePhChange(Number(e.target.value))}
                   className="w-full mt-1 border border-border-light rounded-lg p-2 text-xs font-semibold focus:outline-primary"
                 />
               </div>
@@ -434,48 +692,93 @@ export default function InspectFormPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Soil EC (dS/m)</label>
+                <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                  <span>Soil EC (dS/m)</span>
+                  {readingSources.soilEc !== 'manual' && (
+                    <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full ${
+                      readingSources.soilEc === 'ocr_confirmed' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {readingSources.soilEc === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   step="0.01"
                   value={soilEc}
-                  onChange={(e) => setSoilEc(e.target.value)}
+                  onChange={(e) => handleEcChange(e.target.value)}
                   placeholder="e.g. 1.2"
                   className="w-full mt-1 border border-border-light rounded-lg p-2 text-xs font-semibold focus:outline-primary"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Moisture (%)</label>
+                <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                  <span>Moisture (Gauge/%)</span>
+                  {readingSources.moisture !== 'manual' && (
+                    <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full ${
+                      readingSources.moisture === 'ocr_confirmed' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {readingSources.moisture === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   value={moisture}
-                  onChange={(e) => setMoisture(e.target.value)}
-                  placeholder="e.g. 60"
+                  onChange={(e) => handleMoistureChange(e.target.value)}
+                  placeholder="e.g. 7"
                   className="w-full mt-1 border border-border-light rounded-lg p-2 text-xs font-semibold focus:outline-primary"
                 />
+                <p className="text-[8px] text-text-secondary/70 mt-0.5">Note: OCR scans input a raw 0-10 relative gauge reading.</p>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Temperature (°C)</label>
+                <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                  <span>Temperature (°C)</span>
+                  {readingSources.temperature !== 'manual' && (
+                    <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full ${
+                      readingSources.temperature === 'ocr_confirmed' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {readingSources.temperature === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   step="0.1"
                   value={temperature}
-                  onChange={(e) => setTemperature(e.target.value)}
+                  onChange={(e) => handleTempChange(e.target.value)}
                   placeholder="e.g. 28.5"
                   className="w-full mt-1 border border-border-light rounded-lg p-2 text-xs font-semibold focus:outline-primary"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Humidity (%)</label>
+                <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                  <span>Humidity (%)</span>
+                  {readingSources.humidity !== 'manual' && (
+                    <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded-full ${
+                      readingSources.humidity === 'ocr_confirmed' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {readingSources.humidity === 'ocr_confirmed' ? 'OCR Scan' : 'OCR (Edited)'}
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   value={humidity}
-                  onChange={(e) => setHumidity(e.target.value)}
+                  onChange={(e) => handleHumidityChange(e.target.value)}
                   placeholder="e.g. 80"
                   className="w-full mt-1 border border-border-light rounded-lg p-2 text-xs font-semibold focus:outline-primary"
                 />
@@ -721,6 +1024,318 @@ export default function InspectFormPage() {
           </button>
         </div>
       </form>
+
+      {/* OCR Scanner Modal */}
+      {ocrModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden border border-border-light shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-border-light flex justify-between items-center bg-pale-green/30">
+              <div className="flex items-center gap-2">
+                <Camera className="h-5 w-5 text-primary animate-pulse" />
+                <h2 className="font-bold text-sm text-secondary uppercase tracking-wider text-left">Scan LCD Meter Display</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOcrModalOpen(false)}
+                className="text-text-secondary hover:text-red-500 transition-all p-1"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              {isOcrAnalyzing ? (
+                /* Analyzing State */
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <div className="relative h-16 w-16">
+                    <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                    <RefreshCw className="absolute inset-0 m-auto h-6 w-6 text-primary animate-pulse" />
+                  </div>
+                  <div className="text-center space-y-1">
+                    <p className="text-xs font-bold text-secondary uppercase tracking-wider">Analyzing LCD Display...</p>
+                    <p className="text-[10px] text-text-secondary">On-device seven-segment OCR parser running</p>
+                  </div>
+                </div>
+              ) : activeStep === 'capture' ? (
+                /* Capture / Select Template Step */
+                <div className="space-y-4">
+                  <div className="space-y-1.5 text-center">
+                    <p className="text-xs font-bold text-secondary">Select Meter Test Image or Camera Capture</p>
+                    <p className="text-[10px] text-text-secondary leading-relaxed">
+                      Select a predefined YIERYI handheld meter reading template for evaluation, or upload a custom capture.
+                    </p>
+                  </div>
+
+                  {/* Camera guides preview */}
+                  <div className="relative border-2 border-dashed border-border-light rounded-2xl bg-surface p-4 flex flex-col items-center justify-center min-h-[140px] text-center overflow-hidden">
+                    <div className="absolute inset-0 bg-primary/2 opacity-[0.02]" />
+                    {/* Visual box guides */}
+                    <div className="absolute border border-primary/40 rounded-lg w-5/6 h-5/6 pointer-events-none flex flex-col justify-between p-2">
+                      <div className="flex justify-between">
+                        <div className="border-t-2 border-l-2 border-primary h-3 w-3" />
+                        <div className="border-t-2 border-r-2 border-primary h-3 w-3" />
+                      </div>
+                      <span className="text-[9px] font-bold text-primary/45 uppercase select-none tracking-widest">Align Meter Screen Here</span>
+                      <div className="flex justify-between">
+                        <div className="border-b-2 border-l-2 border-primary h-3 w-3" />
+                        <div className="border-b-2 border-r-2 border-primary h-3 w-3" />
+                      </div>
+                    </div>
+                    <Camera className="h-10 w-10 text-text-secondary opacity-30 mb-2" />
+                    <span className="text-[10px] font-bold text-text-secondary">Align LCD within the box frame</span>
+                  </div>
+
+                  {/* Template Picker */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-text-secondary uppercase">Select Scan Template</label>
+                    <select
+                      value={selectedTemplate}
+                      onChange={(e) => setSelectedTemplate(e.target.value)}
+                      className="w-full border border-border-light rounded-xl p-2.5 text-xs font-semibold focus:outline-primary bg-surface"
+                    >
+                      <option value="perfect">Perfect LCD Scan (pH 6.5, EC 1.24, Temp 26.8°C)</option>
+                      <option value="wrong_temp_unit">Wrong Temp Unit (80.2°F &rarr; REJECT)</option>
+                      <option value="wrong_ec_unit">Wrong EC Unit (1420 uS/cm &rarr; REJECT)</option>
+                      <option value="unclear_glare">Glare/Blurry Scan (EC Unreadable &rarr; BLANK)</option>
+                      <option value="probe_out">Probe Out of Soil (pH 0.0 &rarr; REJECT)</option>
+                      <option value="custom">Use Live Camera / Upload Custom Image</option>
+                    </select>
+                  </div>
+
+                  {/* Actions for Capture */}
+                  <div className="space-y-2 pt-2">
+                    {selectedTemplate === 'custom' ? (
+                      <div className="flex flex-col items-center">
+                        <input
+                          id="ocr-file-upload"
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleOcrFileSelect}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="ocr-file-upload"
+                          className="w-full bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer text-center"
+                        >
+                          <Camera className="h-4 w-4" />
+                          Snap / Choose Meter Photo
+                        </label>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleTemplateScan}
+                        className="w-full bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw className="h-4 w-4 animate-spin-reverse" />
+                        Simulate OCR Scan
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Confirm Step */
+                <div className="space-y-4">
+                  {/* Dynamic Rejection / Verification Warnings */}
+                  {(() => {
+                    const { uError, vError } = getDynamicErrors();
+                    return (
+                      <>
+                        {uError && (
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-left">
+                            <AlertTriangle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold">Incorrect Units Detected</p>
+                              <p className="text-[10px] leading-relaxed text-red-600/90 font-semibold">{uError}</p>
+                            </div>
+                          </div>
+                        )}
+                        {!uError && vError && (
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-orange-50 border border-orange-200 text-orange-700 text-left">
+                            <AlertCircle className="h-4 w-4 shrink-0 text-orange-500 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold">Impossible Reading Rejected</p>
+                              <p className="text-[10px] leading-relaxed text-orange-600/90 font-semibold">{vError}</p>
+                            </div>
+                          </div>
+                        )}
+                        {!uError && !vError && (
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-left">
+                            <Check className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold">LCD Display Read Success</p>
+                              <p className="text-[10px] leading-relaxed text-green-600/90">Please verify the detected digital readings before filling the form.</p>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* Dual Image Visualizer (Original Cropped / Binarized Segment Layout) */}
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-bold text-text-secondary uppercase text-center">Original Cropped LCD</p>
+                      <div className="border border-border-light rounded-xl h-28 overflow-hidden bg-black flex items-center justify-center">
+                        {ocrPreviewUrl ? (
+                          <img src={ocrPreviewUrl} alt="Cropped" className="max-w-full max-h-full object-contain" />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-white/55">
+                            <Camera className="h-6 w-6" />
+                            <span className="text-[8px] mt-1">YIERYI Meter</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-bold text-text-secondary uppercase text-center">CV Segment Binarization</p>
+                      <div className="border border-border-light rounded-xl h-28 overflow-hidden bg-black flex items-center justify-center">
+                        {ocrBinarizedUrl ? (
+                          <img src={ocrBinarizedUrl} alt="Binarized" className="max-w-full max-h-full object-contain filter invert" />
+                        ) : (
+                          <div className="text-[8px] text-white/50">Processing...</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Readings Input list */}
+                  <div className="space-y-3 pt-2 text-left">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Soil pH</span>
+                          {modalPh === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={modalPh}
+                          onChange={(e) => setModalPh(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalPh === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Soil EC (mS/cm)</span>
+                          {modalEc === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={modalEc}
+                          onChange={(e) => setModalEc(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalEc === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Temp (°C)</span>
+                          {modalTemp === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={modalTemp}
+                          onChange={(e) => setModalTemp(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalTemp === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Humidity (%)</span>
+                          {modalHumid === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          value={modalHumid}
+                          onChange={(e) => setModalHumid(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalHumid === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Light (Bars)</span>
+                          {modalLight === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          value={modalLight}
+                          onChange={(e) => setModalLight(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalLight === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-text-secondary uppercase flex items-center justify-between">
+                          <span>Moist (Gauge)</span>
+                          {modalMoist === '' && <span className="text-[7.5px] font-bold px-1 bg-red-100 text-red-700 rounded-sm">Unclear</span>}
+                        </label>
+                        <input
+                          type="number"
+                          value={modalMoist}
+                          onChange={(e) => setModalMoist(e.target.value)}
+                          className={`w-full mt-1 border rounded-lg p-2 text-xs font-semibold focus:outline-primary ${
+                            modalMoist === '' ? 'border-red-300 bg-red-50/50' : 'border-border-light'
+                          }`}
+                          placeholder="Unreadable"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions for Confirm */}
+                  <div className="grid grid-cols-2 gap-3 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveStep('capture')}
+                      className="bg-white text-text-secondary border border-border-light py-3 rounded-full font-bold text-xs hover:bg-surface active:scale-95 transition-all"
+                    >
+                      Retake / Back
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={confirmOcrValues}
+                      disabled={!!getDynamicErrors().uError || (!!getDynamicErrors().vError && Number(modalPh) === 0.0)}
+                      className="bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <Check className="h-4 w-4" />
+                      Confirm & Fill
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
