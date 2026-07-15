@@ -4,8 +4,8 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, X, QrCode, Plus, ChevronRight, RefreshCw, Leaf } from 'lucide-react';
 import { supabase } from '../../../../lib/supabaseClient';
-import { getPlants } from '../../../../lib/offline-db';
-import { PLANTATION, getTrackedPlants, formatPlantId } from '../../../../lib/plantData';
+import { getPlants, getMortalityReports } from '../../../../lib/offline-db';
+import { PLANTATION } from '../../../../lib/plantData';
 
 type HealthStatus = 'healthy' | 'moderate' | 'high-risk' | 'dead';
 
@@ -54,11 +54,12 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
   const router = useRouter();
 
   const [plants, setPlants] = useState<PlantWithHealth[]>([]);
+  const [deadVinesCount, setDeadVinesCount] = useState(0);
+  const [deadTreesCount, setDeadTreesCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const blockInfo = PLANTATION[zone]?.blocks.find(b => b.id === block);
   const totalCapacity = blockInfo?.plants || 0;
-  const trackedPlantIds = getTrackedPlants(zone, block);
 
   const loadPlants = async () => {
     setLoading(true);
@@ -117,7 +118,40 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
         });
       }
 
-      setPlants(Object.values(enrichmentMap));
+      const sortedPlants = Object.values(enrichmentMap).sort(
+        (a, b) => (a.plant_no || 0) - (b.plant_no || 0)
+      );
+      setPlants(sortedPlants);
+
+      // 4. Fetch mortality reports for stats
+      const localMortality = await getMortalityReports();
+      const localBlockMortality = localMortality.filter(
+        r => r.zone === zone && r.block === block
+      );
+
+      const { data: remoteMortality } = await supabase
+        .from('mortality_reports')
+        .select('*')
+        .eq('zone', zone)
+        .eq('block', block);
+
+      const mergedMortality = new Map<string, any>();
+      (remoteMortality || []).forEach(r => {
+        mergedMortality.set(r.id, r);
+      });
+      localBlockMortality.forEach(r => {
+        mergedMortality.set(r.id, { ...mergedMortality.get(r.id), ...r });
+      });
+
+      let totalDeadVines = 0;
+      let totalDeadTrees = 0;
+      mergedMortality.forEach(r => {
+        totalDeadVines += Number(r.dead_vines || 0);
+        totalDeadTrees += Number(r.dead_support_trees || 0);
+      });
+
+      setDeadVinesCount(totalDeadVines);
+      setDeadTreesCount(totalDeadTrees);
     } catch (err) {
       console.error('Error loading plants:', err);
     } finally {
@@ -129,9 +163,7 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
     loadPlants();
   }, [zone, block]);
 
-  const counts = {
-    dead: plants.filter(p => p.health === 'dead').length,
-  };
+
 
   return (
     <div className="flex flex-col bg-surface min-h-screen pb-32">
@@ -162,22 +194,30 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
       </div>
 
       {/* Main Content Area */}
-      {/* Two Stats Cards */}
-      <div className="grid grid-cols-2 gap-4 px-5 pt-5">
-        <div className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block">
+      {/* Three Stats Cards */}
+      <div className="grid grid-cols-3 gap-3 px-5 pt-5">
+        <div className="bg-white border border-border-light rounded-2xl p-3.5 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block leading-tight">
             Total Plants
           </span>
-          <span className="text-2xl font-black text-text-primary block mt-0.5">
+          <span className="text-xl font-black text-text-primary block mt-1">
             {totalCapacity}
           </span>
         </div>
-        <div className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block">
+        <div className="bg-white border border-border-light rounded-2xl p-3.5 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block leading-tight">
             Dead Vines
           </span>
-          <span className="text-2xl font-black text-text-primary block mt-0.5">
-            {counts.dead}
+          <span className="text-xl font-black text-text-primary block mt-1">
+            {deadVinesCount}
+          </span>
+        </div>
+        <div className="bg-white border border-border-light rounded-2xl p-3.5 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-text-secondary tracking-wider block leading-tight">
+            Dead Trees
+          </span>
+          <span className="text-xl font-black text-text-primary block mt-1">
+            {deadTreesCount}
           </span>
         </div>
       </div>
@@ -195,40 +235,31 @@ export default function BlockRegistryPage({ params }: { params: Promise<{ zone: 
         </div>
       )}
 
-      {/* Sampled Inspection Indices */}
-      <div className="px-5 pt-3 pb-3">
-        <h3 className="text-[10px] uppercase font-bold text-text-secondary tracking-widest mb-2.5">
-          Sampled Inspection Indices
-        </h3>
-        <div className="flex gap-2 mb-3 overflow-x-auto scrollbar-none">
-          {trackedPlantIds.map(idx => {
-            const formattedId = formatPlantId(zone, block, idx);
-            const registered = plants.find(p => p.plant_id === formattedId);
-            return (
-              <button
-                key={idx}
-                onClick={() => {
-                  if (registered) {
-                    router.push(`/plant/${formattedId}`);
-                  } else {
-                    router.push(`/add-plant?zone=${zone}&block=${block}&plant_no=${idx}`);
-                  }
-                }}
-                className={`px-4 py-2 rounded-xl text-xs font-bold border shadow-sm transition-all duration-200 active:scale-95 ${
-                  registered
-                    ? 'bg-green-50 text-green-700 border-green-200 hover:border-green-300'
-                    : 'bg-white text-text-secondary border-border-light hover:border-primary/45'
-                }`}
-              >
-                #{String(idx).padStart(3, '0')}
-              </button>
-            );
-          })}
+      {/* Registered Plant IDs Quick Links */}
+      {plants.length > 0 && (
+        <div className="px-5 pt-3 pb-3">
+          <h3 className="text-[10px] uppercase font-bold text-text-secondary tracking-widest mb-2.5">
+            Registered Plant IDs
+          </h3>
+          <div className="flex gap-2 mb-3 overflow-x-auto scrollbar-none animate-in fade-in duration-300">
+            {plants.map(plant => {
+              const plantNo = plant.plant_no || 1;
+              return (
+                <button
+                  key={plant.plant_id}
+                  onClick={() => router.push(`/plant/${plant.plant_id}`)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold border shadow-sm transition-all duration-200 active:scale-95 bg-green-50 text-green-700 border-green-200 hover:border-green-300"
+                >
+                  #{String(plantNo).padStart(3, '0')}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-text-secondary font-medium">
+            Tap any ID to view plant details.
+          </p>
         </div>
-        <p className="text-[10px] text-text-secondary font-medium">
-          Tap ✓ to view plant details or + to register.
-        </p>
-      </div>
+      )}
 
       {/* Plants Card List */}
       <div className="px-5 pt-2 space-y-3">
