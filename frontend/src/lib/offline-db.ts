@@ -352,6 +352,18 @@ export async function getMortalityCount(): Promise<number> {
   return db.count('mortality_reports');
 }
 
+export async function deleteSubmission(id: string): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  await db.delete('submissions', id);
+}
+
+export async function deleteInspection(id: string): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  await db.delete('inspections', id);
+}
+
 // Clear all database tables
 export async function clearAllTables(): Promise<void> {
   const db = await getDB();

@@ -2,8 +2,8 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight } from 'lucide-react';
-import { getPendingSubmissions, getPendingInspections } from '../../lib/offline-db';
+import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight, Trash2 } from 'lucide-react';
+import { getPendingSubmissions, getPendingInspections, deleteSubmission, deleteInspection } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -19,6 +19,8 @@ function HistoryContent() {
   // Selected submission modal
   const [selectedSub, setSelectedSub] = useState<any>(null);
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Search and filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -234,10 +236,51 @@ function HistoryContent() {
   // Close details modal
   const handleCloseDetails = () => {
     setSelectedSub(null);
+    setShowConfirmDelete(false);
+    setDeleting(false);
     if (selectedPhotoUrl && selectedPhotoUrl.startsWith('blob:')) {
       URL.revokeObjectURL(selectedPhotoUrl);
     }
     setSelectedPhotoUrl(null);
+  };
+
+  const handleDeleteSubmission = async () => {
+    if (!selectedSub) return;
+    setDeleting(true);
+    try {
+      if (selectedSub.sync_status === 'synced') {
+        if (!isOnline) {
+          alert('You are currently offline. Synced submissions can only be deleted when you are online.');
+          setDeleting(false);
+          return;
+        }
+
+        // Delete from Supabase
+        const { error } = await supabase
+          .from('inspections')
+          .delete()
+          .eq('id', selectedSub.id);
+
+        if (error) {
+          throw new Error(`Failed to delete from Supabase: ${error.message}`);
+        }
+      }
+
+      // Delete locally from both IndexedDB stores
+      await deleteSubmission(selectedSub.id);
+      await deleteInspection(selectedSub.id);
+
+      // Trigger sync/reload event
+      window.dispatchEvent(new Event('submissions-updated'));
+      
+      handleCloseDetails();
+      alert('Submission report deleted successfully.');
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to delete submission report.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const mapSunlight = (val: string | null) => {
@@ -434,118 +477,172 @@ function HistoryContent() {
               </button>
             </div>
 
-            {/* Modal Scrollable Content */}
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              {/* Photo preview if exists */}
-              {selectedPhotoUrl && (
-                <div className="relative rounded-2xl overflow-hidden border border-border-light h-44 flex-shrink-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={selectedPhotoUrl}
-                    alt="Plant record preview"
-                    className="w-full h-full object-cover"
-                  />
+            {/* Modal Content */}
+            {showConfirmDelete ? (
+              <div className="p-6 text-center space-y-4 flex-1 flex flex-col justify-center items-center">
+                <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center text-red-600 mb-2">
+                  <Trash2 className="h-8 w-8 animate-pulse" />
                 </div>
-              )}
-
-              {/* General Specs */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Soil EC</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {selectedSub.soil_ec !== undefined && selectedSub.soil_ec !== null ? `${selectedSub.soil_ec} dS/m` : 'N/A'}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Moisture</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {selectedSub.moisture !== undefined && selectedSub.moisture !== null ? `${selectedSub.moisture}%` : 'N/A'}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Vine Height</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {selectedSub.vine_height_cm !== undefined && selectedSub.vine_height_cm !== null ? `${selectedSub.vine_height_cm} cm` : 'N/A'}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Soil pH</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.soil_pH ?? selectedSub.soil_ph ?? 'N/A'}</span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Temperature</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {selectedSub.temperature !== undefined && selectedSub.temperature !== null ? `${selectedSub.temperature} °C` : (selectedSub.temperature_c !== undefined && selectedSub.temperature_c !== null ? `${selectedSub.temperature_c} °C` : 'N/A')}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Humidity</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">
-                    {selectedSub.humidity !== undefined && selectedSub.humidity !== null ? `${selectedSub.humidity}%` : (selectedSub.humidity_pct !== undefined && selectedSub.humidity_pct !== null ? `${selectedSub.humidity_pct}%` : 'N/A')}
-                  </span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Sunlight</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{mapSunlight(selectedSub.sunlight_level)}</span>
-                </div>
-                <div className="bg-surface rounded-xl p-3 border border-border-light">
-                  <span className="text-[8px] font-bold text-text-secondary uppercase">Shade Level</span>
-                  <span className="text-xs font-bold text-text-primary block mt-0.5">{mapShade(selectedSub.shade_level)}</span>
-                </div>
-              </div>
-
-              {/* Fertilization info */}
-              <div className="bg-surface rounded-xl p-3 border border-border-light space-y-1">
-                <span className="text-[8px] font-bold text-text-secondary uppercase">Fertilisation Status</span>
-                <div className="text-xs text-text-primary font-bold">
-                  Brand: <span className="font-semibold">{selectedSub.fertiliser_used || 'None'}</span>
-                </div>
-                <div className="text-[10px] text-text-secondary font-semibold">
-                  Types: {Array.isArray(selectedSub.fertiliser_type) ? selectedSub.fertiliser_type.join(', ') : (selectedSub.fertiliser_type || 'N/A')}
-                </div>
-                <div className="text-[10px] text-text-secondary font-semibold flex items-center gap-1.5 mt-0.5">
-                  <span>Source:</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
-                    selectedSub.fertilizer_source === 'carried' 
-                      ? 'bg-pale-green text-primary' 
-                      : 'bg-orange-50 text-orange-600 border border-orange-100'
-                  }`}>
-                    {selectedSub.fertilizer_source || 'edited'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Field Notes */}
-              <div className="bg-surface rounded-xl p-3 border border-border-light">
-                <span className="text-[8px] font-bold text-text-secondary uppercase block mb-1">Field Notes</span>
-                <p className="text-xs font-medium text-text-primary leading-relaxed whitespace-pre-line">
-                  {selectedSub.field_notes ?? selectedSub.notes ?? 'No additional notes recorded.'}
+                <h4 className="font-extrabold text-base text-text-primary">Delete Submission Report?</h4>
+                <p className="text-xs text-text-secondary leading-relaxed max-w-[240px]">
+                  Are you sure you want to delete the inspection report for <span className="font-bold text-text-primary">Plant {selectedSub.plant_id}</span>?
+                  {selectedSub.sync_status === 'synced' ? (
+                    <span className="block mt-2 text-red-500 font-semibold">
+                      Warning: This report is synced. Deleting it will remove it from both Supabase and local cache.
+                    </span>
+                  ) : (
+                    <span className="block mt-2 text-amber-600 font-semibold">
+                      This report is currently pending sync and will be removed from your local queue.
+                    </span>
+                  )}
                 </p>
-              </div>
-
-              {/* Sync details */}
-              <div className="text-[9px] text-text-secondary space-y-0.5 pt-2 border-t border-border-light font-medium">
-                <div>ID: {selectedSub.id}</div>
-                <div>Supervisor: {selectedSub.supervisor_name} ({selectedSub.supervisor_email})</div>
-                <div>Submitted: {new Date(selectedSub.submitted_at || selectedSub.created_at).toLocaleString()}</div>
-                <div className="flex items-center gap-1 mt-1">
-                  <span>Sync Status:</span>
-                  <span className={`font-bold uppercase ${selectedSub.sync_status === 'synced' ? 'text-primary' : 'text-amber-700'}`}>
-                    {selectedSub.sync_status}
-                  </span>
+                <div className="w-full pt-4 space-y-2">
+                  <button
+                    onClick={handleDeleteSubmission}
+                    disabled={deleting}
+                    className="w-full bg-red-600 text-white py-3 rounded-full text-xs font-bold hover:bg-red-700 transition shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {deleting ? (
+                      <>
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent inline-block" />
+                        Deleting...
+                      </>
+                    ) : (
+                      'Yes, Delete Report'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmDelete(false)}
+                    disabled={deleting}
+                    className="w-full bg-gray-100 text-text-primary py-3 rounded-full text-xs font-bold hover:bg-gray-200 transition disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* Modal Scrollable Content */}
+                <div className="p-5 overflow-y-auto space-y-4 flex-1">
+                  {/* Photo preview if exists */}
+                  {selectedPhotoUrl && (
+                    <div className="relative rounded-2xl overflow-hidden border border-border-light h-44 flex-shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={selectedPhotoUrl}
+                        alt="Plant record preview"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
 
-            {/* Modal Footer */}
-            <div className="p-4 bg-gray-50 border-t border-border-light flex-shrink-0">
-              <button
-                onClick={handleCloseDetails}
-                className="w-full bg-[#1B4332] text-white py-3 rounded-full text-xs font-bold hover:bg-primary transition shadow-md"
-              >
-                Close View
-              </button>
-            </div>
+                  {/* General Specs */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Soil EC</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">
+                        {selectedSub.soil_ec !== undefined && selectedSub.soil_ec !== null ? `${selectedSub.soil_ec} dS/m` : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Moisture</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">
+                        {selectedSub.moisture !== undefined && selectedSub.moisture !== null ? `${selectedSub.moisture}%` : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Vine Height</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">
+                        {selectedSub.vine_height_cm !== undefined && selectedSub.vine_height_cm !== null ? `${selectedSub.vine_height_cm} cm` : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Soil pH</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">{selectedSub.soil_pH ?? selectedSub.soil_ph ?? 'N/A'}</span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Temperature</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">
+                        {selectedSub.temperature !== undefined && selectedSub.temperature !== null ? `${selectedSub.temperature} °C` : (selectedSub.temperature_c !== undefined && selectedSub.temperature_c !== null ? `${selectedSub.temperature_c} °C` : 'N/A')}
+                      </span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Humidity</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">
+                        {selectedSub.humidity !== undefined && selectedSub.humidity !== null ? `${selectedSub.humidity}%` : (selectedSub.humidity_pct !== undefined && selectedSub.humidity_pct !== null ? `${selectedSub.humidity_pct}%` : 'N/A')}
+                      </span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Sunlight</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">{mapSunlight(selectedSub.sunlight_level)}</span>
+                    </div>
+                    <div className="bg-surface rounded-xl p-3 border border-border-light">
+                      <span className="text-[8px] font-bold text-text-secondary uppercase">Shade Level</span>
+                      <span className="text-xs font-bold text-text-primary block mt-0.5">{mapShade(selectedSub.shade_level)}</span>
+                    </div>
+                  </div>
+
+                  {/* Fertilization info */}
+                  <div className="bg-surface rounded-xl p-3 border border-border-light space-y-1">
+                    <span className="text-[8px] font-bold text-text-secondary uppercase">Fertilisation Status</span>
+                    <div className="text-xs text-text-primary font-bold">
+                      Brand: <span className="font-semibold">{selectedSub.fertiliser_used || 'None'}</span>
+                    </div>
+                    <div className="text-[10px] text-text-secondary font-semibold">
+                      Types: {Array.isArray(selectedSub.fertiliser_type) ? selectedSub.fertiliser_type.join(', ') : (selectedSub.fertiliser_type || 'N/A')}
+                    </div>
+                    <div className="text-[10px] text-text-secondary font-semibold flex items-center gap-1.5 mt-0.5">
+                      <span>Source:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                        selectedSub.fertilizer_source === 'carried' 
+                          ? 'bg-pale-green text-primary' 
+                          : 'bg-orange-50 text-orange-600 border border-orange-100'
+                      }`}>
+                        {selectedSub.fertilizer_source || 'edited'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Field Notes */}
+                  <div className="bg-surface rounded-xl p-3 border border-border-light">
+                    <span className="text-[8px] font-bold text-text-secondary uppercase block mb-1">Field Notes</span>
+                    <p className="text-xs font-medium text-text-primary leading-relaxed whitespace-pre-line">
+                      {selectedSub.field_notes ?? selectedSub.notes ?? 'No additional notes recorded.'}
+                    </p>
+                  </div>
+
+                  {/* Sync details */}
+                  <div className="text-[9px] text-text-secondary space-y-0.5 pt-2 border-t border-border-light font-medium">
+                    <div>ID: {selectedSub.id}</div>
+                    <div>Supervisor: {selectedSub.supervisor_name} ({selectedSub.supervisor_email})</div>
+                    <div>Submitted: {new Date(selectedSub.submitted_at || selectedSub.created_at).toLocaleString()}</div>
+                    <div className="flex items-center gap-1 mt-1">
+                      <span>Sync Status:</span>
+                      <span className={`font-bold uppercase ${selectedSub.sync_status === 'synced' ? 'text-primary' : 'text-amber-700'}`}>
+                        {selectedSub.sync_status}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 bg-gray-50 border-t border-border-light flex-shrink-0 flex gap-2">
+                  <button
+                    onClick={() => setShowConfirmDelete(true)}
+                    className="flex-1 border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 py-3 rounded-full text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                  <button
+                    onClick={handleCloseDetails}
+                    className="flex-1 bg-[#1B4332] text-white py-3 rounded-full text-xs font-bold hover:bg-primary transition shadow-md"
+                  >
+                    Close View
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
