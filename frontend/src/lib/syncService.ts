@@ -4,14 +4,11 @@ import {
   markAsSyncedInDB,
   getMortalityReports,
   getPendingPlants,
-  getPendingPlantLocations,
   getPendingInspections,
   markPlantAsSynced,
-  markPlantLocationAsSynced,
   markInspectionAsSynced,
   getPlant,
   savePlantOffline as saveLocalPlant,
-  savePlantLocationOffline as saveLocalLoc,
   saveInspectionOffline as saveLocalInsp,
   getSetting,
   saveSetting,
@@ -93,17 +90,7 @@ export async function savePlantOfflineService(plantData: any): Promise<void> {
   await saveLocalPlant(plant);
 }
 
-/**
- * Saves a new plant location info offline in IndexedDB.
- */
-export async function savePlantLocationOfflineService(locationData: any): Promise<void> {
-  const location = {
-    ...locationData,
-    sync_status: 'pending',
-    created_at: locationData.created_at || new Date().toISOString()
-  };
-  await saveLocalLoc(location);
-}
+
 
 /**
  * Saves a new slot offline in IndexedDB.
@@ -120,7 +107,11 @@ export async function saveSlotOfflineService(slotData: any): Promise<void> {
 /**
  * Saves an inspection submission locally in IndexedDB.
  */
-export async function saveInspectionOfflineService(inspData: any, photoBlob: Blob | null): Promise<string> {
+export async function saveInspectionOfflineService(
+  inspData: any,
+  photoBlob: Blob | null,
+  meterPhotoBlob: Blob | null = null
+): Promise<string> {
   const now = new Date();
   
   // Format inspection unique ID
@@ -147,6 +138,11 @@ export async function saveInspectionOfflineService(inspData: any, photoBlob: Blo
     ? `Inspection_${inspData.plant_id}_${now.toISOString().slice(0, 10)}.jpg`
     : null;
 
+  const meterPhotoBase64 = meterPhotoBlob ? await blobToBase64(meterPhotoBlob) : null;
+  const meterPhotoFilename = meterPhotoBlob
+    ? `Meter_${inspData.plant_id}_${now.toISOString().slice(0, 10)}_${timeStr}.jpg`
+    : null;
+
   const inspection = {
     ...inspData,
     id: inspectionId,
@@ -157,7 +153,9 @@ export async function saveInspectionOfflineService(inspData: any, photoBlob: Blo
     supervisor_name: supervisorName,
     supervisor_email: supervisorEmail,
     photo_blob: photoBase64,
-    photo_filename: photoFilename
+    photo_filename: photoFilename,
+    meter_photo_blob: meterPhotoBase64,
+    meter_photo_filename: meterPhotoFilename
   };
 
   await saveLocalInsp(inspection);
@@ -296,45 +294,41 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
     console.error('Error syncing plants:', err);
   }
 
-  // 2. Sync Pending Plant Locations → Supabase directly
-  try {
-    const pendingLocations = await getPendingPlantLocations();
-    for (const loc of pendingLocations) {
-      try {
-        const payload = { ...loc };
-        delete payload.sync_status;
 
-        const { error } = await supabase
-          .from('plant_locations')
-          .upsert(payload, { onConflict: 'plant_id' });
-
-        if (error) {
-          throw new Error(error.message);
-        }
-
-        await markPlantLocationAsSynced(loc.plant_id);
-        synced++;
-      } catch (err) {
-        console.error(`Sync failed for plant location ${loc.plant_id}:`, err);
-        failed++;
-      }
-    }
-  } catch (err) {
-    console.error('Error syncing plant locations:', err);
-  }
 
   // 3. Sync Pending Inspections (New Structure) → Supabase directly
   try {
     const pendingInspections = await getPendingInspections();
     for (const inspection of pendingInspections) {
       try {
+        // Join static plant details to reconstruct a unified submission for Google Sheets
+        const plant = await getPlant(inspection.plant_id);
+        let zoneChar = plant?.zone;
+        let blockVal = plant?.block;
+
+        if (!zoneChar || !blockVal) {
+          const match = inspection.plant_id.match(/^([A-Z])([0-9]+)-P[0-9]+$/i);
+          if (match) {
+            zoneChar = zoneChar || match[1].toUpperCase();
+            blockVal = blockVal || match[2];
+          }
+        }
+        
+        // Final fallbacks
+        zoneChar = zoneChar || inspection.plant_id.charAt(0) || 'Unknown';
+        blockVal = blockVal || inspection.plant_id.substring(1, 3) || 'Unknown_Block';
+
+        const zoneFolder = zoneChar.toUpperCase();
+        const blockFolder = String(blockVal).startsWith('Block') ? blockVal : `Block ${String(blockVal).padStart(2, '0')}`;
+        const plantNo = plant?.plant_no || 1;
+
         let supabasePhotoUrl = null;
 
         // Upload photo to Supabase Storage first if present
         if (inspection.photo_blob && inspection.photo_filename) {
           try {
             const blob = base64ToBlob(inspection.photo_blob);
-            const filePath = `inspections/${inspection.plant_id}/${inspection.photo_filename}`;
+            const filePath = `${zoneFolder}/${blockFolder}/${inspection.photo_filename}`;
             
             const { data: uploadData, error: uploadError } = await supabase.storage
               .from('inspection-photos')
@@ -356,11 +350,33 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           }
         }
 
-        // Join static plant details to reconstruct a unified submission for Google Sheets
-        const plant = await getPlant(inspection.plant_id);
-        const zoneChar = plant?.zone || inspection.plant_id.charAt(0);
-        const blockVal = plant?.block || inspection.plant_id.substring(1, 3);
-        const plantNo = plant?.plant_no || 1;
+        let supabaseMeterPhotoUrl = null;
+
+        // Upload meter photo to Supabase Storage first if present
+        if (inspection.meter_photo_blob && inspection.meter_photo_filename) {
+          try {
+            const blob = base64ToBlob(inspection.meter_photo_blob);
+            const filePath = `Meter_Readings/${zoneFolder}/${blockFolder}/${inspection.meter_photo_filename}`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('inspection-photos')
+              .upload(filePath, blob, {
+                contentType: 'image/jpeg',
+                upsert: true
+              });
+              
+            if (uploadError) {
+              console.error('Error uploading meter photo to Supabase Storage:', uploadError);
+            } else {
+              const { data: publicUrlData } = supabase.storage
+                .from('inspection-photos')
+                .getPublicUrl(filePath);
+              supabaseMeterPhotoUrl = publicUrlData.publicUrl;
+            }
+          } catch (photoErr: any) {
+            console.error('Failed to upload meter photo for inspection:', photoErr);
+          }
+        }
 
         const unifiedSubmission = {
           id: inspection.id,
@@ -431,7 +447,10 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           notes: inspection.notes,
           photo_url: supabasePhotoUrl || inspection.photo_url,
           fertilizer_source: inspection.fertilizer_source || 'carried',
-          reading_source: inspection.reading_source || {},
+          reading_source: {
+            ...(inspection.reading_source || {}),
+            ...(supabaseMeterPhotoUrl ? { meter_photo_url: supabaseMeterPhotoUrl } : {})
+          },
           sync_status: 'synced'
         };
 
@@ -443,7 +462,7 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
           throw new Error(error.message);
         }
 
-        await markInspectionAsSynced(inspection.id, supabasePhotoUrl || undefined);
+        await markInspectionAsSynced(inspection.id, supabasePhotoUrl || undefined, supabaseMeterPhotoUrl || undefined);
         synced++;
       } catch (err) {
         console.error(`Sync failed for inspection ${inspection.id}:`, err);
@@ -464,7 +483,9 @@ export async function syncPendingSubmissions(): Promise<{ synced: number; failed
         if (submission.photo_blob && submission.photo_filename) {
           try {
             const blob = base64ToBlob(submission.photo_blob);
-            const filePath = `${submission.zone || 'unassigned'}/${submission.photo_filename}`;
+            const zoneFolder = submission.zone ? submission.zone.toUpperCase() : 'Unknown';
+            const blockFolder = submission.block ? (String(submission.block).startsWith('Block') ? submission.block : `Block ${String(submission.block).padStart(2, '0')}`) : 'Unknown_Block';
+            const filePath = `${zoneFolder}/${blockFolder}/${submission.photo_filename}`;
             
             const { data: uploadData, error: uploadError } = await supabase.storage
               .from('inspection-photos')
@@ -732,30 +753,7 @@ export async function pullPlantsFromSupabase(): Promise<{ slotsCount: number; pl
       }
     }
 
-    // 2. Fetch plant locations
-    const { data: locData, error: locError } = await supabase
-      .from('plant_locations')
-      .select('*');
 
-    if (locError) {
-      throw new Error(locError.message);
-    }
-
-    if (locData && locData.length > 0) {
-      for (const loc of locData) {
-        // Check if there is a pending local location first
-        const { getPlantLocation } = await import('./offline-db');
-        const existingLocalLoc = await getPlantLocation(loc.plant_id);
-        if (existingLocalLoc?.sync_status === 'pending') {
-          continue;
-        }
-        await saveLocalLoc({
-          ...loc,
-          sync_status: 'synced'
-        });
-        locationsCount++;
-      }
-    }
   } catch (err) {
     console.error('Error pulling plants/locations from Supabase:', err);
   }

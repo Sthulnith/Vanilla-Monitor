@@ -60,6 +60,7 @@ export default function InspectFormPage() {
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string | null>(null);
   const [ocrBinarizedUrl, setOcrBinarizedUrl] = useState<string | null>(null);
+  const [meterPhotoFile, setMeterPhotoFile] = useState<File | null>(null);
 
   // OCR Confirm Form States (prefilled from scan)
   const [modalPh, setModalPh] = useState<string>('');
@@ -123,17 +124,19 @@ export default function InspectFormPage() {
   const startScanner = () => {
     setOcrModalOpen(true);
     setActiveStep('capture');
-    setSelectedTemplate('perfect');
+    setSelectedTemplate('custom');
     setOcrPreviewUrl(null);
     setOcrBinarizedUrl(null);
     setOcrUnitError(null);
     setOcrValidationError(null);
+    setMeterPhotoFile(null);
   };
 
   const handleOcrFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
+    setMeterPhotoFile(file);
     setIsOcrAnalyzing(true);
     const preview = URL.createObjectURL(file);
     setOcrPreviewUrl(preview);
@@ -196,26 +199,48 @@ export default function InspectFormPage() {
     let vError = ocrValidationError;
     
     const phNum = Number(modalPh);
-    if (!isNaN(phNum) && phNum === 0.0 && modalPh !== '') {
-      vError = 'Soil pH is 0.0. Check if the probe is fully inserted in moist soil.';
-    } else if (phNum > 0.0 || modalPh === '') {
-      if (vError && vError.includes('pH is 0.0')) {
-        vError = null;
+    if (!isNaN(phNum) && modalPh !== '') {
+      if (phNum < 3.5 || phNum > 9.0) {
+        vError = 'Soil pH is out of bounds (3.5-9.0). Check if the probe is fully inserted in moist soil.';
+      } else {
+        if (vError && (vError.includes('pH is 0.0') || vError.includes('out of bounds'))) {
+          vError = null;
+        }
       }
     }
     
     const tempNum = Number(modalTemp);
-    if (!isNaN(tempNum) && tempNum > 50 && selectedTemplate === 'custom') {
+    if (!isNaN(tempNum) && tempNum > 50) {
       uError = 'Temperature is in °F. Please click unit toggle on the meter to switch to °C.';
     }
     
     return { uError, vError };
   };
 
+  const autoConvertUnits = () => {
+    const tempNum = Number(modalTemp);
+    if (!isNaN(tempNum) && tempNum > 50) {
+      const converted = ((tempNum - 32) * 5) / 9;
+      setModalTemp(converted.toFixed(1));
+    }
+    
+    const ecNum = Number(modalEc);
+    if (!isNaN(ecNum) && ecNum > 10) {
+      const converted = ecNum / 1000;
+      setModalEc(converted.toFixed(2));
+    }
+
+    setOcrUnitError(null);
+  };
+
   const confirmOcrValues = () => {
-    const { uError } = getDynamicErrors();
+    const { uError, vError } = getDynamicErrors();
     if (uError) {
       alert('Cannot confirm with unit errors. Please switch the units and retake the photo.');
+      return;
+    }
+    if (vError) {
+      alert('Cannot confirm with validation errors. Please correct the out-of-bounds soil pH or retake the photo.');
       return;
     }
     
@@ -462,7 +487,7 @@ export default function InspectFormPage() {
       };
 
       // Save offline
-      const inspectionId = await saveInspectionOfflineService(inspectionData, photoFile);
+      const inspectionId = await saveInspectionOfflineService(inspectionData, photoFile, meterPhotoFile);
 
       // Trigger background synchronization
       syncPendingSubmissions().catch(err => console.error('Sync failed:', err));
@@ -1064,7 +1089,7 @@ export default function InspectFormPage() {
                   <div className="space-y-1.5 text-center">
                     <p className="text-xs font-bold text-secondary">Select Meter Test Image or Camera Capture</p>
                     <p className="text-[10px] text-text-secondary leading-relaxed">
-                      Select a predefined YIERYI handheld meter reading template for evaluation, or upload a custom capture.
+                      Capture a crisp, frame-filling, square-on shot of the LCD display under bright lighting.
                     </p>
                   </div>
 
@@ -1087,53 +1112,34 @@ export default function InspectFormPage() {
                     <span className="text-[10px] font-bold text-text-secondary">Align LCD within the box frame</span>
                   </div>
 
-                  {/* Template Picker */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-text-secondary uppercase">Select Scan Template</label>
-                    <select
-                      value={selectedTemplate}
-                      onChange={(e) => setSelectedTemplate(e.target.value)}
-                      className="w-full border border-border-light rounded-xl p-2.5 text-xs font-semibold focus:outline-primary bg-surface"
-                    >
-                      <option value="perfect">Perfect LCD Scan (pH 6.5, EC 1.24, Temp 26.8°C)</option>
-                      <option value="wrong_temp_unit">Wrong Temp Unit (80.2°F &rarr; REJECT)</option>
-                      <option value="wrong_ec_unit">Wrong EC Unit (1420 uS/cm &rarr; REJECT)</option>
-                      <option value="unclear_glare">Glare/Blurry Scan (EC Unreadable &rarr; BLANK)</option>
-                      <option value="probe_out">Probe Out of Soil (pH 0.0 &rarr; REJECT)</option>
-                      <option value="custom">Use Live Camera / Upload Custom Image</option>
-                    </select>
+                  <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-left text-orange-700 text-[10px] space-y-1">
+                    <p className="font-bold flex items-center gap-1">⚠️ Capture Guide & Safety Fallback</p>
+                    <ul className="list-disc pl-3.5 space-y-0.5 font-semibold text-orange-600/90">
+                      <li>The screen must be square-on, flat, and fully fill the guide box.</li>
+                      <li>Implausible readings (like pH outside 3.5–9.0 range) will be rejected to prevent bad data.</li>
+                      <li>Any unreadable digit cells can be easily filled in manually afterward.</li>
+                    </ul>
                   </div>
 
                   {/* Actions for Capture */}
                   <div className="space-y-2 pt-2">
-                    {selectedTemplate === 'custom' ? (
-                      <div className="flex flex-col items-center">
-                        <input
-                          id="ocr-file-upload"
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={handleOcrFileSelect}
-                          className="hidden"
-                        />
-                        <label
-                          htmlFor="ocr-file-upload"
-                          className="w-full bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer text-center"
-                        >
-                          <Camera className="h-4 w-4" />
-                          Snap / Choose Meter Photo
-                        </label>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleTemplateScan}
-                        className="w-full bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 flex items-center justify-center gap-1.5"
+                    <div className="flex flex-col items-center">
+                      <input
+                        id="ocr-file-upload"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleOcrFileSelect}
+                        className="hidden"
+                      />
+                      <label
+                        htmlFor="ocr-file-upload"
+                        className="w-full bg-primary text-white py-3 rounded-full font-bold text-xs shadow-md hover:bg-primary/95 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer text-center transition-all"
                       >
-                        <RefreshCw className="h-4 w-4 animate-spin-reverse" />
-                        Simulate OCR Scan
-                      </button>
-                    )}
+                        <Camera className="h-4 w-4" />
+                        Snap / Choose Meter Photo
+                      </label>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -1142,15 +1148,26 @@ export default function InspectFormPage() {
                   {/* Dynamic Rejection / Verification Warnings */}
                   {(() => {
                     const { uError, vError } = getDynamicErrors();
+                    const isAllFailed = modalPh === '' && modalEc === '' && modalTemp === '' && modalHumid === '';
+                    const isPartialRead = modalPh === '' || modalEc === '' || modalTemp === '' || modalHumid === '';
                     return (
                       <>
                         {uError && (
-                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-left">
-                            <AlertTriangle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
-                            <div className="space-y-0.5">
-                              <p className="text-xs font-bold">Incorrect Units Detected</p>
-                              <p className="text-[10px] leading-relaxed text-red-600/90 font-semibold">{uError}</p>
+                          <div className="flex flex-col gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-left">
+                            <div className="flex items-start gap-2.5">
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-bold">Incorrect Units Detected</p>
+                                <p className="text-[10px] leading-relaxed text-red-600/90 font-semibold">{uError}</p>
+                              </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={autoConvertUnits}
+                              className="mt-1 self-start px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-bold shadow-xs transition-all"
+                            >
+                              Auto-Convert to Metric (°C / mS/cm)
+                            </button>
                           </div>
                         )}
                         {!uError && vError && (
@@ -1162,7 +1179,25 @@ export default function InspectFormPage() {
                             </div>
                           </div>
                         )}
-                        {!uError && !vError && (
+                        {!uError && !vError && isAllFailed && (
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-left">
+                            <AlertCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold">LCD Display Read Failed</p>
+                              <p className="text-[10px] leading-relaxed text-red-600/90">Could not confidently parse any digit fields. Please verify and manually input values or retake the photo.</p>
+                            </div>
+                          </div>
+                        )}
+                        {!uError && !vError && !isAllFailed && isPartialRead && (
+                          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-orange-50 border border-orange-200 text-orange-700 text-left">
+                            <AlertCircle className="h-4 w-4 shrink-0 text-orange-500 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold">LCD Display Partial Read</p>
+                              <p className="text-[10px] leading-relaxed text-orange-600/90">Some digits were unreadable and left blank. Please review the highlighted fields and fill them in manually.</p>
+                            </div>
+                          </div>
+                        )}
+                        {!uError && !vError && !isAllFailed && !isPartialRead && (
                           <div className="flex items-start gap-2.5 p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-left">
                             <Check className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />
                             <div className="space-y-0.5">

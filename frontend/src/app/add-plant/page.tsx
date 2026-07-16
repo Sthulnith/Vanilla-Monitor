@@ -4,19 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Compass, Download, QrCode } from 'lucide-react';
 import QRCode from 'qrcode';
-import { savePlantOfflineService, savePlantLocationOfflineService, saveSlotOfflineService, syncPendingSubmissions } from '../../lib/syncService';
+import { savePlantOfflineService, saveSlotOfflineService, syncPendingSubmissions } from '../../lib/syncService';
 import { PLANTATION } from '../../lib/plantData';
 import { getSlot, getPlant } from '../../lib/offline-db';
 
-function generateUUID() {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
+
 
 export default function AddPlantPage() {
   const router = useRouter();
@@ -91,12 +83,37 @@ export default function AddPlantPage() {
     }
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude);
-        setLongitude(position.coords.longitude);
-        setAltitude(position.coords.altitude);
-        setAccuracy(position.coords.accuracy);
-        setGpsLoading(false);
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const acc = position.coords.accuracy;
+        let alt = position.coords.altitude;
+
+        setLatitude(lat);
+        setLongitude(lng);
+        setAccuracy(acc);
+
+        if (alt !== null && alt !== undefined) {
+          setAltitude(alt);
+          setGpsLoading(false);
+        } else {
+          // If altitude is null/undefined, try to fetch it from a free elevation API
+          try {
+            const response = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`);
+            if (response.ok) {
+              const data = await response.json();
+              if (data && Array.isArray(data.elevation) && data.elevation.length > 0) {
+                setAltitude(data.elevation[0]);
+              } else if (data && typeof data.elevation === 'number') {
+                setAltitude(data.elevation);
+              }
+            }
+          } catch (e) {
+            console.error('Failed to fetch elevation from external API:', e);
+          } finally {
+            setGpsLoading(false);
+          }
+        }
       },
       (error) => {
         console.error('Error fetching GPS:', error);
@@ -136,7 +153,6 @@ export default function AddPlantPage() {
   const handleSavePlant = async () => {
     setLoading(true);
     try {
-      const newPlantId = generateUUID();
       const slotId = plantId; // e.g. "C01-P002"
 
       // Check if slot already exists and has an active plant
@@ -154,6 +170,8 @@ export default function AddPlantPage() {
           }
         }
       }
+
+      const newPlantId = `${slotId}-G${nextGen}`;
 
       const slotRecord = {
         slot_id: slotId,
@@ -199,18 +217,9 @@ export default function AddPlantPage() {
         retired_date: null
       };
 
-      const locationRecord = {
-        plant_id: newPlantId,
-        latitude: latitude || 0,
-        longitude: longitude || 0,
-        altitude: altitude || null,
-        accuracy: accuracy || null
-      };
-
       // Save offline
       await saveSlotOfflineService(slotRecord);
       await savePlantOfflineService(plantRecord);
-      await savePlantLocationOfflineService(locationRecord);
 
       // Update old plant if it existed
       if (oldPlantId && oldPlant) {

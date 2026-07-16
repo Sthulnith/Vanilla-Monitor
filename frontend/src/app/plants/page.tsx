@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { Sprout, Search, X, QrCode, Download, MapPin, Calendar, Leaf, TreePine, FlaskConical, Ruler, ArrowLeft, RefreshCw } from 'lucide-react';
-import { getPlants, getPlantLocation } from '../../lib/offline-db';
+import { getPlants, getSlot } from '../../lib/offline-db';
 import { supabase } from '../../lib/supabaseClient';
 import QRCode from 'qrcode';
 import Link from 'next/link';
@@ -73,16 +73,20 @@ export default function PlantsPage() {
     setQrUrl('');
 
     // Load location
-    const loc = await getPlantLocation(plant.plant_id);
-    if (!loc) {
-      const { data } = await supabase
-        .from('plant_locations')
-        .select('*')
-        .eq('plant_id', plant.plant_id)
-        .single();
-      setPlantLocation(data || null);
+    if (plant.slot_id) {
+      const loc = await getSlot(plant.slot_id);
+      if (!loc) {
+        const { data } = await supabase
+          .from('slots')
+          .select('*')
+          .eq('slot_id', plant.slot_id)
+          .maybeSingle();
+        setPlantLocation(data || null);
+      } else {
+        setPlantLocation(loc);
+      }
     } else {
-      setPlantLocation(loc);
+      setPlantLocation(null);
     }
   };
 

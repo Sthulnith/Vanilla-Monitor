@@ -90,9 +90,9 @@ export default function DashboardPage() {
       const { data } = await supabase
         .from('inspections')
         .select(`
-          id, plant_id, inspection_date, created_at, foliage_color,
+          id, plant_id, slot_id, inspection_date, created_at, foliage_color,
           soil_ph, watering_status, vine_height_cm, notes, sync_status,
-          plants!left(zone, block, common_name, variety, plant_type)
+          plants!left(slot_id, zone, block, common_name, variety, plant_type)
         `)
         .order('created_at', { ascending: false })
         .limit(3);
@@ -100,6 +100,7 @@ export default function DashboardPage() {
       if (data && data.length > 0) {
         recent = data.map((r: any) => ({
           ...r,
+          slot_id: r.plants?.slot_id || r.slot_id,
           zone: r.plants?.zone || r.plant_id?.charAt(0) || '?',
           block: r.plants?.block || r.plant_id?.substring(1, 3) || '??',
           common_name: r.plants?.common_name || 'Vanilla',
@@ -374,7 +375,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3">
                     <div className={`h-3 w-3 rounded-full ${getFoliageColorDot(sub.foliage_color)}`} />
                     <div>
-                      <h4 className="text-xs font-bold text-text-primary">Plant {sub.plant_id}</h4>
+                      <h4 className="text-xs font-bold text-text-primary">Plant {sub.slot_id || sub.plant_id}</h4>
                       <p className="text-[10px] text-text-secondary mt-0.5">
                         pH: {sub.soil_pH ?? sub.soil_ph ?? 'N/A'} • {sub.watering_status || 'N/A'} • Height: {sub.vine_height_cm !== undefined && sub.vine_height_cm !== null ? `${sub.vine_height_cm} cm` : 'N/A'}
                       </p>

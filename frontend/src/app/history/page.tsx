@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { History, Search, RefreshCw, X, CheckCircle, Wifi, WifiOff, FileText, ChevronRight, Trash2 } from 'lucide-react';
-import { getPendingSubmissions, getPendingInspections, deleteSubmission, deleteInspection } from '../../lib/offline-db';
+import { getPendingSubmissions, getPendingInspections, deleteSubmission, deleteInspection, getPlant } from '../../lib/offline-db';
 import { syncPendingSubmissions, base64ToBlob } from '../../lib/syncService';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -108,7 +108,15 @@ function HistoryContent() {
     try {
       const { data, error } = await supabase
         .from('inspections')
-        .select('*');
+        .select(`
+          *,
+          plants!left(
+            slot_id,
+            zone,
+            block,
+            plant_type
+          )
+        `);
       if (!error && data) {
         remoteInsps = data;
       }
@@ -120,18 +128,66 @@ function HistoryContent() {
     const remoteInspsFiltered = remoteInsps.filter(r => !pendingInsps.some(p => p.id === r.id));
 
     // Map new inspections to have compatible display fields
-    const mappedInsps = [...pendingInsps, ...remoteInspsFiltered].map(i => ({
-      ...i,
-      submitted_at: i.created_at || i.inspection_date,
-      field_notes: i.notes,
-      soil_pH: i.soil_ph,
-      fertiliser_type: i.fertilizer_type || [],
-      fertiliser_used: i.fertilizer_used,
-      last_fertilised: i.last_fertilized,
-      zone: i.zone || i.plant_id?.split('-')[0]?.charAt(0) || 'A',
-      block: i.block || i.plant_id?.split('-')[0]?.substring(1) || '01',
-      common_name: i.common_name || 'Vanilla',
-      variety: i.variety || 'Local'
+    const mappedInsps = await Promise.all([...pendingInsps, ...remoteInspsFiltered].map(async i => {
+      // 1. Resolve plant info
+      // Check if the inspection record itself has the slot_id/zone/block, otherwise fetch plant info
+      let resolvedSlotId = i.slot_id;
+      let resolvedZone = i.zone;
+      let resolvedBlock = i.block;
+      let resolvedPlantType = i.plant_type;
+
+      // Also get plants relation if we selected it from Supabase
+      if (i.plants) {
+        resolvedSlotId = resolvedSlotId || i.plants.slot_id;
+        resolvedZone = resolvedZone || i.plants.zone;
+        resolvedBlock = resolvedBlock || i.plants.block;
+        resolvedPlantType = resolvedPlantType || i.plants.plant_type;
+      }
+
+      // If still missing, check local IndexedDB
+      if (!resolvedSlotId || !resolvedZone || !resolvedBlock) {
+        const localPlant = await getPlant(i.plant_id);
+        if (localPlant) {
+          resolvedSlotId = resolvedSlotId || localPlant.slot_id;
+          resolvedZone = resolvedZone || localPlant.zone;
+          resolvedBlock = resolvedBlock || localPlant.block;
+          resolvedPlantType = resolvedPlantType || localPlant.plant_type;
+        }
+      }
+
+      // If still missing, parse plant_id regex if it matches A01-P001
+      if (!resolvedSlotId) {
+        const match = i.plant_id?.match(/^([A-Z])([0-9]+)-P([0-9]+)$/i);
+        if (match) {
+          resolvedSlotId = i.plant_id;
+          resolvedZone = resolvedZone || match[1].toUpperCase();
+          resolvedBlock = resolvedBlock || match[2];
+        }
+      }
+
+      // Final fallbacks
+      resolvedSlotId = resolvedSlotId || i.plant_id;
+      resolvedZone = resolvedZone || i.plant_id?.split('-')[0]?.charAt(0) || 'A';
+      resolvedBlock = resolvedBlock || i.plant_id?.split('-')[0]?.substring(1) || '01';
+
+      // Format block (strip 'Block' prefix if present, pad to 2 digits)
+      const cleanBlock = resolvedBlock ? String(resolvedBlock).replace(/^Block\s+/i, '').padStart(2, '0') : '01';
+
+      return {
+        ...i,
+        slot_id: resolvedSlotId,
+        submitted_at: i.created_at || i.inspection_date,
+        field_notes: i.notes,
+        soil_pH: i.soil_ph,
+        fertiliser_type: i.fertilizer_type || [],
+        fertiliser_used: i.fertilizer_used,
+        last_fertilised: i.last_fertilized,
+        zone: resolvedZone,
+        block: cleanBlock,
+        plant_type: resolvedPlantType || 'Cutting',
+        common_name: i.common_name || 'Vanilla',
+        variety: i.variety || 'Local'
+      };
     }));
 
     const allSubmissions = [

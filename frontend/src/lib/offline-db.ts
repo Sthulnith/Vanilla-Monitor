@@ -135,11 +135,10 @@ export async function getPendingCount(): Promise<number> {
   if (!db) return 0;
   const pendingSubmissions = await getPendingSubmissions();
   const pendingPlants = await getPendingPlants();
-  const pendingLocations = await getPendingPlantLocations();
   const pendingInspections = await getPendingInspections();
   const pendingSlots = await getPendingSlots();
   
-  return pendingSubmissions.length + pendingPlants.length + pendingLocations.length + pendingInspections.length + pendingSlots.length;
+  return pendingSubmissions.length + pendingPlants.length + pendingInspections.length + pendingSlots.length;
 }
 
 export async function markAsSyncedInDB(id: string, photoUrl?: string): Promise<void> {
@@ -186,10 +185,12 @@ export async function getPlantGPS(plantId: string): Promise<{ lat: number; lng: 
   const db = await getDB();
   if (!db) return null;
   
-  // Try new plant_locations first
-  const newLoc = await db.get('plant_locations', plantId);
-  if (newLoc) {
-    return { lat: Number(newLoc.latitude), lng: Number(newLoc.longitude) };
+  const plant = await db.get('plants', plantId);
+  if (plant && plant.slot_id) {
+    const slot = await db.get('slots', plant.slot_id);
+    if (slot && slot.latitude !== undefined && slot.longitude !== undefined) {
+      return { lat: Number(slot.latitude), lng: Number(slot.longitude) };
+    }
   }
   
   const record = await db.get('plant_gps', plantId);
@@ -257,8 +258,9 @@ export async function registerReplacement(slotId: string, newPlantData: any): Pr
     oldPlant = await plantsStore.get(oldPlantId);
   }
 
-  // 2. Generate a new plant ID using crypto.randomUUID()
-  const newPlantId = crypto.randomUUID();
+  // 2. Generate a new plant ID using the understandable slot_id and generation format
+  const nextGen = (oldPlant?.generation || 0) + 1;
+  const newPlantId = `${slotId}-G${nextGen}`;
 
   // 3. Create the NEW plant
   const newPlant = {
@@ -338,40 +340,7 @@ export async function markPlantAsSynced(plantId: string): Promise<void> {
   }
 }
 
-// Plant Locations Store
-export async function savePlantLocationOffline(location: any): Promise<void> {
-  const db = await getDB();
-  if (!db) return;
-  await db.put('plant_locations', location);
-}
 
-export async function getPlantLocation(plantId: string): Promise<any | null> {
-  const db = await getDB();
-  if (!db) return null;
-  return db.get('plant_locations', plantId);
-}
-
-export async function getPlantLocations(): Promise<any[]> {
-  const db = await getDB();
-  if (!db) return [];
-  return db.getAll('plant_locations');
-}
-
-export async function getPendingPlantLocations(): Promise<any[]> {
-  const db = await getDB();
-  if (!db) return [];
-  return db.getAllFromIndex('plant_locations', 'sync_status', 'pending');
-}
-
-export async function markPlantLocationAsSynced(plantId: string): Promise<void> {
-  const db = await getDB();
-  if (!db) return;
-  const loc = await db.get('plant_locations', plantId);
-  if (loc) {
-    loc.sync_status = 'synced';
-    await db.put('plant_locations', loc);
-  }
-}
 
 // Inspections Store
 export async function saveInspectionOffline(inspection: any): Promise<void> {
@@ -398,7 +367,7 @@ export async function getPendingInspections(): Promise<any[]> {
   return db.getAllFromIndex('inspections', 'sync_status', 'pending');
 }
 
-export async function markInspectionAsSynced(id: string, photoUrl?: string): Promise<void> {
+export async function markInspectionAsSynced(id: string, photoUrl?: string, meterPhotoUrl?: string): Promise<void> {
   const db = await getDB();
   if (!db) return;
   const insp = await db.get('inspections', id);
@@ -406,6 +375,10 @@ export async function markInspectionAsSynced(id: string, photoUrl?: string): Pro
     insp.sync_status = 'synced';
     if (photoUrl) {
       insp.photo_url = photoUrl;
+    }
+    if (meterPhotoUrl) {
+      if (!insp.reading_source) insp.reading_source = {};
+      insp.reading_source.meter_photo_url = meterPhotoUrl;
     }
     await db.put('inspections', insp);
   }

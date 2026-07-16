@@ -139,7 +139,9 @@ function NewInspectionInner() {
       let photoUrl: string | null = null;
       if (photoFile) {
         const ext = photoFile.name.split('.').pop() || 'jpg';
-        const path = `inspections/${selectedPlant.plant_id}/Inspection_${selectedPlant.plant_id}_${now.toISOString().split('T')[0]}.${ext}`;
+        const zoneFolder = selectedPlant.zone ? selectedPlant.zone.toUpperCase() : 'Unknown';
+        const blockFolder = selectedPlant.block ? (String(selectedPlant.block).startsWith('Block') ? selectedPlant.block : `Block ${String(selectedPlant.block).padStart(2, '0')}`) : 'Unknown_Block';
+        const path = `${zoneFolder}/${blockFolder}/Inspection_${selectedPlant.plant_id}_${now.toISOString().split('T')[0]}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from('inspection-photos')
           .upload(path, photoFile, { upsert: true });

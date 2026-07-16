@@ -1,11 +1,14 @@
 import os
+import io
 from typing import List, Optional
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from PIL import Image
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -318,3 +321,193 @@ async def get_mortality_reports():
         return {"data": response.data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# ----------------- OCR DECODER ENDPOINTS (OPTION A) -----------------
+
+import json
+
+# Load digit recognition model
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "digit_model.json")
+try:
+    with open(MODEL_PATH, "r") as f:
+        model_weights = json.load(f)
+    W1 = np.array(model_weights["W1"])
+    b1 = np.array(model_weights["b1"])
+    W2 = np.array(model_weights["W2"])
+    b2 = np.array(model_weights["b2"])
+    W3 = np.array(model_weights["W3"])
+    b3 = np.array(model_weights["b3"])
+except Exception as e:
+    print(f"Warning: Could not load digit_model.json: {e}")
+    W1, b1, W2, b2, W3, b3 = None, None, None, None, None, None
+
+def otsu_threshold(gray: np.ndarray) -> int:
+    hist, bin_edges = np.histogram(gray, bins=256, range=(0, 256))
+    total = gray.size
+    
+    current_max = 0.0
+    threshold = 127
+    
+    sum_total = np.sum(np.arange(256) * hist)
+    sum_back = 0.0
+    weight_back = 0.0
+    
+    for t in range(256):
+        weight_back += hist[t]
+        if weight_back == 0:
+            continue
+        weight_fore = total - weight_back
+        if weight_fore == 0:
+            break
+            
+        sum_back += t * hist[t]
+        mean_back = sum_back / weight_back
+        mean_fore = (sum_total - sum_back) / weight_fore
+        
+        var_between = weight_back * weight_fore * (mean_back - mean_fore) ** 2
+        if var_between > current_max:
+            current_max = var_between
+            threshold = t
+            
+    return threshold
+
+def predict_digit(flat_img):
+    if W1 is None:
+        return 10, 0.0
+    h1 = np.maximum(0, np.dot(flat_img, W1) + b1)
+    h2 = np.maximum(0, np.dot(h1, W2) + b2)
+    scores = np.dot(h2, W3) + b3
+    # Softmax
+    exps = np.exp(scores - np.max(scores))
+    probs = exps / np.sum(exps)
+    cls = np.argmax(probs)
+    return int(cls), float(probs[cls])
+
+@app.post("/api/ocr/decode-field")
+async def decode_field(
+    file: UploadFile = File(...),
+    num_digits: int = Form(3),
+    has_decimal_at: Optional[int] = Form(None)
+):
+    try:
+        image_data = await file.read()
+        img = Image.open(io.BytesIO(image_data))
+        # Ensure we have a grayscale representation
+        img_gray = img.convert("L")
+        img_np = np.array(img_gray)
+        
+        # Otsu binarization
+        thresh = otsu_threshold(img_np)
+        binary_img = img_np < thresh
+        h, w = binary_img.shape
+        
+        # Calculate horizontal profile (column sums of active pixels)
+        col_sums = np.sum(binary_img, axis=0)
+        min_active_pixels = max(1, int(h * 0.05))
+        active = col_sums >= min_active_pixels
+        
+        # Find segments of active columns
+        segments = []
+        in_segment = False
+        seg_start = 0
+        for x in range(w):
+            if active[x] and not in_segment:
+                in_segment = True
+                seg_start = x
+            elif not active[x] and in_segment:
+                in_segment = False
+                width = x - seg_start
+                if width >= 2:
+                    segments.append({"start": seg_start, "width": width})
+        if in_segment:
+            width = w - seg_start
+            if width >= 2:
+                segments.append({"start": seg_start, "width": width})
+                
+        # Group/filter segments
+        digit_boxes = []
+        if len(segments) == num_digits:
+            digit_boxes = segments
+        elif len(segments) > num_digits:
+            # Take the largest N segments sorted left-to-right
+            sorted_by_width = sorted(segments, key=lambda s: s["width"], reverse=True)
+            chosen = sorted(sorted_by_width[:num_digits], key=lambda s: s["start"])
+            digit_boxes = chosen
+        else:
+            # Fallback to equal-width
+            digit_w = w / num_digits
+            for d in range(num_digits):
+                digit_boxes.append({"start": int(d * digit_w), "width": int(digit_w)})
+                
+        digits_str = ""
+        for d in range(num_digits):
+            if has_decimal_at is not None and d == has_decimal_at:
+                digits_str += "."
+                
+            box = digit_boxes[d]
+            sx = box["start"]
+            ex = sx + box["width"]
+            slot_binary = binary_img[:, sx:ex]
+            
+            # Convert slot binary back to grayscale 0/255 for PIL
+            slot_gray_np = np.where(slot_binary, 0, 255).astype(np.uint8)
+            slot_img = Image.fromarray(slot_gray_np)
+            
+            # Aspect-ratio-preserving centering on 28x28 canvas
+            sw, sh = slot_img.size
+            aspect_ratio = sw / sh
+            
+            if aspect_ratio > 1.0:
+                dh = max(4, int(28 / aspect_ratio))
+                dy = (28 - dh) // 2
+                dw = 28
+                dx = 0
+            else:
+                dw = max(4, int(28 * aspect_ratio))
+                dx = (28 - dw) // 2
+                dh = 28
+                dy = 0
+                
+            bg_img = Image.new("L", (28, 28), 255)
+            slot_resized = slot_img.resize((dw, dh), Image.BILINEAR)
+            bg_img.paste(slot_resized, (dx, dy))
+            
+            # Normalize to [0, 1] range
+            slot_vector = np.array(bg_img, dtype=np.float32) / 255.0
+            
+            cls, conf = predict_digit(slot_vector.flatten())
+            if cls == 10:
+                digits_str += " "
+            else:
+                digits_str += str(cls)
+                
+        cleaned = digits_str.strip()
+        if not cleaned:
+            return {"value": None}
+            
+        try:
+            return {"value": float(cleaned)}
+        except ValueError:
+            return {"value": None}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- TFLITE DEEP LEARNING SCAN ENDPOINT -----------------
+
+from tflite_inference import TFLiteMeterOCR
+tflite_ocr_engine = TFLiteMeterOCR()
+
+@app.post("/api/ocr/scan-meter")
+async def scan_meter(
+    file: UploadFile = File(...)
+):
+    try:
+        image_data = await file.read()
+        result = tflite_ocr_engine.run_inference(image_data, filename=file.filename)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

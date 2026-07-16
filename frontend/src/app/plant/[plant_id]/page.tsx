@@ -79,8 +79,12 @@ export default function PlantTwinPage({ params }: { params: Promise<{ plant_id: 
       setPlant(p || null);
 
       // GPS
-      const { data: loc } = await supabase.from('plant_locations').select('*').eq('plant_id', plant_id).single();
-      setLocation(loc || null);
+      if (p && p.slot_id) {
+        const { data: loc } = await supabase.from('slots').select('*').eq('slot_id', p.slot_id).maybeSingle();
+        setLocation(loc || null);
+      } else {
+        setLocation(null);
+      }
 
       // Latest inspection only
       const { data: inspections } = await supabase
