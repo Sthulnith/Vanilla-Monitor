@@ -23,7 +23,9 @@ import {
   getSubmissions,
   getMortalityStats,
   saveMortalityReport,
-  saveSubmissionOffline
+  saveSubmissionOffline,
+  getInspections,
+  getPlant
 } from '../../lib/offline-db';
 import { supabase } from '../../lib/supabaseClient';
 import { PLANTATION } from '../../lib/plantData';
@@ -84,40 +86,147 @@ export default function DashboardPage() {
     const count = await getPendingCount();
     setPendingCount(count);
 
-    // Pull latest 3 inspections from Supabase (joined with plants for zone/block/variety)
-    let recent: any[] = [];
-    try {
-      const { data } = await supabase
-        .from('inspections')
-        .select(`
-          id, plant_id, slot_id, inspection_date, created_at, foliage_color,
-          soil_ph, watering_status, vine_height_cm, notes, sync_status,
-          plants!left(slot_id, zone, block, common_name, variety, plant_type)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (data && data.length > 0) {
-        recent = data.map((r: any) => ({
-          ...r,
-          slot_id: r.plants?.slot_id || r.slot_id,
-          zone: r.plants?.zone || r.plant_id?.charAt(0) || '?',
-          block: r.plants?.block || r.plant_id?.substring(1, 3) || '??',
-          common_name: r.plants?.common_name || 'Vanilla',
-          variety: r.plants?.variety || 'Local',
-          plant_type: r.plants?.plant_type || 'Cutting',
-          soil_pH: r.soil_ph,
-          submitted_at: r.created_at || r.inspection_date,
-          sync_status: r.sync_status || 'synced',
-        }));
+    // Helpers to map submissions / inspections consistently
+    const mapLegacyItem = async (sub: any) => {
+      let resolvedSlotId = sub.slot_id || sub.plant_id;
+      if (!resolvedSlotId) {
+        const derivedPlantId = `${sub.zone}${String(sub.block).padStart(2, '0')}-P${String(sub.plant_number || '001').padStart(3, '0')}`;
+        resolvedSlotId = derivedPlantId;
       }
-    } catch {
-      // Offline fallback: use legacy IndexedDB submissions
-      const offline = await getSubmissions();
-      recent = [...offline]
-        .sort((a, b) => new Date(b.submitted_at || b.created_at).getTime() - new Date(a.submitted_at || a.created_at).getTime())
-        .slice(0, 3);
+      if (resolvedSlotId && !sub.slot_id) {
+        const localPlant = await getPlant(resolvedSlotId);
+        if (localPlant?.slot_id) {
+          resolvedSlotId = localPlant.slot_id;
+        }
+      }
+      return {
+        ...sub,
+        slot_id: resolvedSlotId,
+        submitted_at: sub.submitted_at || sub.created_at,
+        sync_status: sub.sync_status || sub.status || 'pending',
+        soil_pH: sub.soil_pH ?? sub.soil_ph,
+      };
+    };
+
+    const mapInspectionItem = async (i: any) => {
+      let resolvedSlotId = i.slot_id;
+      let resolvedZone = i.zone;
+      let resolvedBlock = i.block;
+      let resolvedPlantType = i.plant_type;
+
+      if (i.plants) {
+        resolvedSlotId = resolvedSlotId || i.plants.slot_id;
+        resolvedZone = resolvedZone || i.plants.zone;
+        resolvedBlock = resolvedBlock || i.plants.block;
+        resolvedPlantType = resolvedPlantType || i.plants.plant_type;
+      }
+
+      if (!resolvedSlotId || !resolvedZone || !resolvedBlock) {
+        const localPlant = await getPlant(i.plant_id);
+        if (localPlant) {
+          resolvedSlotId = resolvedSlotId || localPlant.slot_id;
+          resolvedZone = resolvedZone || localPlant.zone;
+          resolvedBlock = resolvedBlock || localPlant.block;
+          resolvedPlantType = resolvedPlantType || localPlant.plant_type;
+        }
+      }
+
+      if (!resolvedSlotId) {
+        const match = i.plant_id?.match(/^([A-Z])([0-9]+)-P([0-9]+)$/i);
+        if (match) {
+          resolvedSlotId = i.plant_id;
+          resolvedZone = resolvedZone || match[1].toUpperCase();
+          resolvedBlock = resolvedBlock || match[2];
+        }
+      }
+
+      resolvedSlotId = resolvedSlotId || i.plant_id;
+      resolvedZone = resolvedZone || i.plant_id?.split('-')[0]?.charAt(0) || 'A';
+      resolvedBlock = resolvedBlock || i.plant_id?.split('-')[0]?.substring(1) || '01';
+
+      const cleanBlock = resolvedBlock ? String(resolvedBlock).replace(/^Block\s+/i, '').padStart(2, '0') : '01';
+
+      return {
+        ...i,
+        slot_id: resolvedSlotId,
+        zone: resolvedZone,
+        block: cleanBlock,
+        common_name: i.common_name || i.plants?.common_name || 'Vanilla',
+        variety: i.variety || i.plants?.variety || 'Local',
+        plant_type: resolvedPlantType || 'Cutting',
+        soil_pH: i.soil_ph ?? i.soil_pH,
+        submitted_at: i.created_at || i.inspection_date || i.submitted_at,
+        sync_status: i.sync_status || 'synced',
+      };
+    };
+
+    // 1. Fetch local offline/legacy submissions & new inspections from IndexedDB
+    const localSubs = await getSubmissions();
+    const localInsps = await getInspections();
+
+    // 2. Fetch remote inspections from Supabase
+    let remoteInsps: any[] = [];
+    const isMockOffline = typeof window !== 'undefined' && localStorage.getItem('mock_offline') === 'true';
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    if (!isMockOffline && isOnline) {
+      try {
+        const { data, error } = await supabase
+          .from('inspections')
+          .select(`
+            id, plant_id, slot_id, inspection_date, created_at, foliage_color,
+            soil_ph, watering_status, vine_height_cm, notes, sync_status,
+            plants!left(slot_id, zone, block, common_name, variety, plant_type)
+          `)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (!error && data) {
+          remoteInsps = data;
+        }
+      } catch (err) {
+        console.error('Failed to fetch remote inspections on dashboard:', err);
+      }
     }
+
+    // Filter remote records to avoid duplicates with local inspections (by ID)
+    const remoteInspsFiltered = remoteInsps.filter(
+      r => !localInsps.some(l => l.id === r.id)
+    );
+
+    // Map all items
+    const mappedLocalSubs = await Promise.all(localSubs.map(mapLegacyItem));
+    const mappedLocalInsps = await Promise.all(localInsps.map(mapInspectionItem));
+    const mappedRemoteInsps = await Promise.all(remoteInspsFiltered.map(mapInspectionItem));
+
+    // Combine them
+    const allSubmissions = [
+      ...mappedLocalSubs,
+      ...mappedLocalInsps,
+      ...mappedRemoteInsps
+    ];
+
+    // Sort descending by date (latest on top)
+    const parseDateMs = (dateVal: any): number => {
+      if (!dateVal) return 0;
+      if (typeof dateVal === 'number') return dateVal;
+      if (dateVal instanceof Date) return dateVal.getTime();
+      let str = String(dateVal).trim();
+      let t = Date.parse(str);
+      if (!isNaN(t)) return t;
+      str = str.replace(' ', 'T');
+      t = Date.parse(str);
+      if (!isNaN(t)) return t;
+      return 0;
+    };
+
+    const sorted = allSubmissions.sort((a, b) => {
+      const dateA = parseDateMs(a.submitted_at || a.created_at || a.inspection_date);
+      const dateB = parseDateMs(b.submitted_at || b.created_at || b.inspection_date);
+      return dateB - dateA;
+    });
+
+    const recent = sorted.slice(0, 3);
 
     setStats({
       totalPlants: 2187,
